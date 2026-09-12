@@ -1,12 +1,16 @@
 # PGC — Plateforme de Gestion de Crise
-# NB: le service `postgres` est fourni pour le DEV LOCAL uniquement. En
-# production, l'app se connecte au PostgreSQL partagé réel de la Ville
-# (changer POSTGRES_HOST/PORT/DB/USER/PASSWORD dans .env — aucun changement
-# de code nécessaire) et ce service peut être retiré du déploiement.
+# NB: le service `postgres` est fourni pour le DEV LOCAL uniquement, sous le
+# profil Compose "dev" — il ne démarre PAS avec un simple `docker compose up`.
+# Par défaut, le backend se connecte au PostgreSQL partagé réel de la Ville
+# via POSTGRES_HOST/PORT/DB/USER/PASSWORD dans .env (aucun changement de code
+# nécessaire). Pour du dev 100% local avec la base jetable de ce compose :
+#   docker compose --profile dev up -d
+# (et mettre POSTGRES_HOST=postgres dans .env le temps du dev local).
 services:
   postgres:
     image: postgres:16-alpine
     restart: always
+    profiles: ["dev"]
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-ivry_admin}
       - POSTGRES_USER=${POSTGRES_USER:-pgc_app}
@@ -29,12 +33,8 @@ services:
     env_file: .env
     environment:
       - NODE_ENV=production
-      - POSTGRES_HOST=postgres
     volumes:
       - pgc_uploads:/app/uploads
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   frontend:
     build:
