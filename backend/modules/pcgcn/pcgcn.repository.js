@@ -35,22 +35,30 @@ const updateFiche = (id, f, userId) => {
 const removeFiche = (id) => db.run('DELETE FROM pgc.pcgcn_fiches WHERE id = $1', [id]);
 
 // --- Tome 3 : annuaire -------------------------------------------------------
-const listContacts = (sources) => sources?.length
-  ? db.all('SELECT * FROM pgc.pcgcn_contacts WHERE source = ANY($1) ORDER BY nom, prenom', [sources])
-  : db.all('SELECT * FROM pgc.pcgcn_contacts ORDER BY nom, prenom');
+// `groupe` ne distingue que les contacts manuels/STUDIO RH : 'dsi' (onglet
+// Contacts DSI) vs 'autre' (onglet Autres contacts utiles) — sans objet pour
+// source='hubdsi' (organigramme, catégorisé via `notes`).
+const listContacts = (sources, groupe) => {
+  const clauses = []; const params = [];
+  if (sources?.length) { params.push(sources); clauses.push(`source = ANY($${params.length})`); }
+  if (groupe) { params.push(groupe); clauses.push(`groupe = $${params.length}`); }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return db.all(`SELECT * FROM pgc.pcgcn_contacts ${where} ORDER BY nom, prenom`, params);
+};
 const createContact = (c, userId) =>
   db.get(
     `INSERT INTO pgc.pcgcn_contacts
-       (source, agent_ref, nom, prenom, fonction, direction, telephone_pro, telephone_astreinte, email, role_crise, notes, updated_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+       (source, agent_ref, nom, prenom, fonction, direction, telephone_pro, telephone_astreinte, email, role_crise, notes, groupe, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
     [c.source || 'manuel', c.agentRef || null, c.nom, c.prenom || null, c.fonction || null, c.direction || null,
-      c.telephonePro || null, c.telephoneAstreinte || null, c.email || null, c.roleCrise || null, c.notes || null, userId]
+      c.telephonePro || null, c.telephoneAstreinte || null, c.email || null, c.roleCrise || null, c.notes || null,
+      c.groupe || 'dsi', userId]
   );
 const updateContact = (id, c, userId) => {
   const cols = {
     nom: c.nom, prenom: c.prenom, fonction: c.fonction, direction: c.direction,
     telephone_pro: c.telephonePro, telephone_astreinte: c.telephoneAstreinte,
-    email: c.email, role_crise: c.roleCrise, notes: c.notes,
+    email: c.email, role_crise: c.roleCrise, notes: c.notes, groupe: c.groupe,
   };
   const sets = []; const params = [];
   for (const [col, val] of Object.entries(cols)) {

@@ -108,7 +108,8 @@ export interface PcgcnFiche {
 
 export interface PcgcnContact {
   id: number;
-  source: 'manuel' | 'studiorh';
+  source: 'manuel' | 'studiorh' | 'hubdsi';
+  groupe: 'dsi' | 'autre';
   agent_ref: string | null;
   nom: string;
   prenom: string | null;

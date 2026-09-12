@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { AttachmentsList } from '../../components/AttachmentsList';
-import { markdownToHtml } from '../../utils/markdown';
+import { MarkdownField } from '../../components/MarkdownField';
 import type { PcgcnSection, PcgcnSectionCode, PcaActivity, PraProcedure } from '../../types';
 
 const ORDER: PcgcnSectionCode[] = ['gouvernance', 'niveaux_de_crise', 'roles', 'pca', 'pra', 'communication', 'juridique', 'annexes'];
@@ -58,31 +58,14 @@ export function Tome1({ canEdit }: { canEdit: boolean }) {
 function RubriqueEditor({ value, onChange, onSave, canEdit }: {
   value: string; onChange: (v: string) => void; onSave: () => void; canEdit: boolean;
 }) {
-  const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
 
   if (!canEdit && !value) return <p className="text-sm text-gray-400">Aucun contenu renseigné.</p>;
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-1">
-        <button onClick={() => setPreview((p) => !p)} className="text-xs text-ville hover:underline">
-          {preview ? 'Éditer' : 'Aperçu'}
-        </button>
-        <span className="text-xs text-gray-400">Titres avec #, gras **texte**, listes avec -</span>
-      </div>
-      {preview ? (
-        <div className="rendered-content text-sm border rounded p-3 bg-gray-50" dangerouslySetInnerHTML={{ __html: markdownToHtml(value) || '<p class="text-gray-400">Vide</p>' }} />
-      ) : (
-        <textarea
-          className="w-full border rounded px-3 py-2 text-sm font-mono"
-          rows={8}
-          value={value}
-          disabled={!canEdit}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )}
-      {canEdit && !preview && (
+      <MarkdownField value={value} onChange={onChange} disabled={!canEdit} rows={8} />
+      {canEdit && (
         <button
           onClick={async () => { setSaving(true); await onSave(); setSaving(false); }}
           className="mt-2 text-sm bg-ville text-white px-3 py-1.5 rounded hover:bg-ville-dark disabled:opacity-60"

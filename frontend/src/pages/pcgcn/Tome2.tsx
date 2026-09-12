@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { AttachmentsList } from '../../components/AttachmentsList';
+import { MarkdownField } from '../../components/MarkdownField';
 import type { PcgcnFiche } from '../../types';
 
 const TYPE_LABELS: Record<string, string> = {
@@ -114,16 +115,13 @@ function FicheDetail({ ficheId, canEdit, onSaved }: { ficheId: number; canEdit: 
   if (!fiche) return <div className="p-3 text-sm text-gray-400">Chargement…</div>;
 
   const field = (key: keyof PcgcnFiche, label: string) => (
-    <div>
-      <label className="block text-xs text-gray-500 mb-1">{label}</label>
-      <textarea
-        className="w-full border rounded px-2 py-1.5 text-sm"
-        rows={3}
-        disabled={!canEdit}
-        value={(fiche[key] as string) || ''}
-        onChange={(e) => setFiche({ ...fiche, [key]: e.target.value })}
-      />
-    </div>
+    <MarkdownField
+      label={label}
+      rows={3}
+      disabled={!canEdit}
+      value={(fiche[key] as string) || ''}
+      onChange={(v) => setFiche({ ...fiche, [key]: v })}
+    />
   );
 
   async function save() {

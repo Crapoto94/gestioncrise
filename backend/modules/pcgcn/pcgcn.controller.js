@@ -67,7 +67,7 @@ async function getEcolesReferentiel(req, res, next) {
 async function listContacts(req, res, next) {
   try {
     const sources = req.query.source ? String(req.query.source).split(',') : undefined;
-    res.json(await repo.listContacts(sources));
+    res.json(await repo.listContacts(sources, req.query.groupe));
   } catch (err) { next(err); }
 }
 async function createContact(req, res, next) {

@@ -4,14 +4,14 @@ import { api } from '../../services/api';
 import { AttachmentsList } from '../../components/AttachmentsList';
 import type { PcgcnContact, PcgcnExterne } from '../../types';
 
-const SUBTABS = ['Élus', 'Encadrants', 'Contacts utiles', 'Prestataires', 'Organismes'] as const;
+const SUBTABS = ['Élus', 'Encadrants', 'Contacts DSI', 'Autres contacts utiles', 'Prestataires', 'Organismes'] as const;
 type SubTab = typeof SUBTABS[number];
 
 export function Tome3({ canEdit }: { canEdit: boolean }) {
   const [tab, setTab] = useState<SubTab>('Élus');
   return (
     <div className="space-y-4">
-      <div className="flex gap-4 border-b">
+      <div className="flex gap-4 border-b flex-wrap">
         {SUBTABS.map((t) => (
           <button
             key={t}
@@ -24,7 +24,8 @@ export function Tome3({ canEdit }: { canEdit: boolean }) {
       </div>
       {tab === 'Élus' && <ElusTab />}
       {tab === 'Encadrants' && <EncadrantsTab canEdit={canEdit} />}
-      {tab === 'Contacts utiles' && <ContactsUtilesTab canEdit={canEdit} />}
+      {tab === 'Contacts DSI' && <ContactsUtilesTab canEdit={canEdit} groupe="dsi" />}
+      {tab === 'Autres contacts utiles' && <ContactsUtilesTab canEdit={canEdit} groupe="autre" />}
       {tab === 'Prestataires' && <ExternesTab category="prestataire" canEdit={canEdit} />}
       {tab === 'Organismes' && <ExternesTab category="organisme" canEdit={canEdit} />}
     </div>
@@ -135,14 +136,14 @@ function EncadrantsTab({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-function ContactsUtilesTab({ canEdit }: { canEdit: boolean }) {
+function ContactsUtilesTab({ canEdit, groupe }: { canEdit: boolean; groupe: 'dsi' | 'autre' }) {
   const [contacts, setContacts] = useState<PcgcnContact[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
-  function load() { api.get('/pcgcn/contacts', { params: { source: 'manuel,studiorh' } }).then((r) => setContacts(r.data)); }
-  useEffect(load, []);
+  function load() { api.get('/pcgcn/contacts', { params: { source: 'manuel,studiorh', groupe } }).then((r) => setContacts(r.data)); }
+  useEffect(load, [groupe]);
 
   async function syncStudioRh() {
     setSyncing(true); setSyncMsg(null);
@@ -158,7 +159,7 @@ function ContactsUtilesTab({ canEdit }: { canEdit: boolean }) {
   }
 
   async function createContact(fields: Partial<PcgcnContact>) {
-    await api.post('/pcgcn/contacts', fields);
+    await api.post('/pcgcn/contacts', { ...fields, groupe });
     setShowForm(false);
     load();
   }
@@ -176,15 +177,21 @@ function ContactsUtilesTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-gray-500">Contacts pratiques pour la cellule de crise (équipe DSI, astreintes...) — saisie manuelle, complétable par synchronisation STUDIO RH.</p>
+      <p className="text-xs text-gray-500">
+        {groupe === 'dsi'
+          ? 'Équipe DSI et ses astreintes — saisie manuelle, complétable par synchronisation STUDIO RH.'
+          : "Autres contacts utiles en cellule de crise, hors DSI (astreintes d'autres directions, contacts ponctuels...) — saisie manuelle."}
+      </p>
       {canEdit && (
         <div className="flex gap-2">
           <button onClick={() => setShowForm((v) => !v)} className="flex items-center gap-1 bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark">
             <Plus size={16} /> Ajouter un contact
           </button>
-          <button onClick={syncStudioRh} disabled={syncing} className="flex items-center gap-1 border text-sm px-3 py-2 rounded hover:bg-gray-50 disabled:opacity-60">
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> Synchroniser STUDIO RH
-          </button>
+          {groupe === 'dsi' && (
+            <button onClick={syncStudioRh} disabled={syncing} className="flex items-center gap-1 border text-sm px-3 py-2 rounded hover:bg-gray-50 disabled:opacity-60">
+              <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> Synchroniser STUDIO RH
+            </button>
+          )}
         </div>
       )}
       {syncMsg && <p className="text-xs text-gray-500">{syncMsg}</p>}
