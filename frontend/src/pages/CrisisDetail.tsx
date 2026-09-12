@@ -2,18 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { api, downloadFile } from '../services/api';
-import { SeverityBadge, StatusBadge } from '../components/StatusBadge';
+import { SeverityBadge } from '../components/StatusBadge';
 import { Timeline } from '../components/Timeline';
+import { WorkflowStepper } from '../components/WorkflowStepper';
 import { markdownToHtml } from '../utils/markdown';
-import type { Crisis, CrisisType, Severity, CrisisEvent, CrisisDecision, CrisisDocument, CrisisCommunication, TeamsThreadResult } from '../types';
-
-const TYPE_LABELS: Record<string, string> = {
-  cyberattaque: 'Cyberattaque', ransomware: 'Ransomware', ddos: 'Déni de service (DDoS)',
-  defacement: 'Défacement / réseaux sociaux', phishing: 'Phishing', compromission_mail: 'Compromission mail',
-  fuite_donnees: 'Fuite de données', panne_reseau: 'Panne réseau', panne_applicative: 'Panne applicative',
-  panne_datacenter: 'Panne datacenter', panne_electrique: 'Panne électrique', sinistre_salle_serveur: 'Sinistre salle serveur',
-  cloud_saas: 'Cloud / SaaS', telephonie: 'Téléphonie', ecoles: 'Écoles', police_municipale: 'Police municipale', autre: 'Autre',
-};
+import { TYPE_LABELS } from '../constants/crisisTypes';
+import type { Crisis, CrisisType, Severity, CrisisEvent, CrisisDecision, CrisisDocument, CrisisCommunication, CrisisMailbox, TeamsThreadResult } from '../types';
 
 /** Convertit un ISO datetime en valeur acceptée par <input type="datetime-local">. */
 function toLocalInput(iso: string | null | undefined) {
@@ -23,8 +17,18 @@ function toLocalInput(iso: string | null | undefined) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-const TABS = ['Synthèse', 'Main courante', 'Décisions', 'Documents', 'Communications', 'Teams & IA'] as const;
-type Tab = typeof TABS[number];
+function formatDuration(opened: string, closed: string) {
+  const ms = new Date(closed).getTime() - new Date(opened).getTime();
+  if (ms <= 0) return '—';
+  const hours = Math.floor(ms / 3_600_000);
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return days > 0 ? `${days} j ${restHours} h` : `${hours} h`;
+}
+
+const BASE_TABS = ['Synthèse', 'Main courante', 'Décisions', 'Documents', 'Communications', 'Teams & IA'] as const;
+const MAILBOXES_TAB = 'Boîtes mail' as const;
+type Tab = typeof BASE_TABS[number] | typeof MAILBOXES_TAB;
 
 const WORKFLOW = ['detection', 'qualification', 'cellule', 'resolution', 'retex', 'cloturee'];
 
@@ -66,6 +70,8 @@ export function CrisisDetail() {
 
   if (!crisis) return <div className="p-6 text-gray-500">{error || 'Chargement…'}</div>;
 
+  const tabs: readonly Tab[] = crisis.type === 'compromission_mail' ? [...BASE_TABS, MAILBOXES_TAB] : BASE_TABS;
+
   return (
     <div className="p-6 space-y-4">
       {editing ? (
@@ -81,7 +87,6 @@ export function CrisisDetail() {
             </div>
             <div className="flex gap-2 mt-1 items-center">
               <SeverityBadge severity={crisis.severity} />
-              <StatusBadge status={crisis.status} />
               <span className="text-xs text-gray-400">{TYPE_LABELS[crisis.type] || crisis.type}</span>
             </div>
           </div>
@@ -102,8 +107,14 @@ export function CrisisDetail() {
       )}
       {error && <div className="text-red-600 text-sm">{error}</div>}
 
+      {!editing && (
+        <div className="bg-white rounded-lg shadow-sm px-6 py-4">
+          <WorkflowStepper status={crisis.status} />
+        </div>
+      )}
+
       <div className="border-b flex gap-4">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -120,6 +131,7 @@ export function CrisisDetail() {
       {tab === 'Documents' && <DocumentsTab crisisId={crisisId} />}
       {tab === 'Communications' && <CommunicationsTab crisisId={crisisId} />}
       {tab === 'Teams & IA' && <TeamsIaTab crisisId={crisisId} crisis={crisis} onUpdated={loadCrisis} />}
+      {tab === MAILBOXES_TAB && <MailboxesTab crisisId={crisisId} />}
     </div>
   );
 }
@@ -139,8 +151,24 @@ function CrisisEditForm({ crisis, onSave, onCancel }: {
   const [servicesImpactes, setServicesImpactes] = useState(crisis.services_impactes || '');
   const [notes, setNotes] = useState(crisis.notes || '');
 
+  const [dateError, setDateError] = useState<string | null>(null);
+
+  // Garde-fou : le champ natif <input type="datetime-local"> peut produire
+  // une année à 1-3 chiffres si elle est éditée au clavier chiffre par
+  // chiffre (ex. "0206" au lieu de "2026") — jamais rattrapé par le
+  // navigateur. On refuse plutôt que d'enregistrer une date absurde.
+  function plausibleYear(value: string) {
+    const year = Number(value.slice(0, 4));
+    return year >= 1970 && year <= 2100;
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    if ((openedAt && !plausibleYear(openedAt)) || (closedAt && !plausibleYear(closedAt))) {
+      setDateError("Année invalide dans une des dates — vérifiez le format (ex. 12/09/2026).");
+      return;
+    }
+    setDateError(null);
     onSave({
       title, type, severity, description,
       opened_at: openedAt ? new Date(openedAt).toISOString() : undefined,
@@ -197,6 +225,7 @@ function CrisisEditForm({ crisis, onSave, onCancel }: {
         <label className="block text-sm text-gray-600 mb-1">Notes</label>
         <textarea className="w-full border rounded px-3 py-2 text-sm" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
+      {dateError && <div className="col-span-2 text-red-600 text-sm">{dateError}</div>}
       <div className="col-span-2 flex justify-end gap-2">
         <button type="button" onClick={onCancel} className="px-3 py-2 text-sm rounded border">Annuler</button>
         <button type="submit" className="px-3 py-2 text-sm rounded bg-ville text-white hover:bg-ville-dark">Enregistrer</button>
@@ -207,15 +236,38 @@ function CrisisEditForm({ crisis, onSave, onCancel }: {
 
 const INCIDENT_KIND_LABELS: Record<string, string> = { interruption: 'Interruption de service', degradation: 'Dégradation de service' };
 
-function SyntheseTab({ crisis }: { crisis: Crisis }) {
+function InfoField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-lg shadow-sm p-4 space-y-2 text-sm">
-      <p><span className="text-gray-500">Impacts de l'incident : </span>{crisis.description || '—'}</p>
-      {crisis.incident_kind && <p><span className="text-gray-500">Nature : </span>{INCIDENT_KIND_LABELS[crisis.incident_kind] || crisis.incident_kind}</p>}
-      {crisis.services_impactes && <p><span className="text-gray-500">Services impactés : </span>{crisis.services_impactes}</p>}
-      <p><span className="text-gray-500">Ouverte le : </span>{new Date(crisis.opened_at).toLocaleString('fr-FR')}</p>
-      {crisis.closed_at && <p><span className="text-gray-500">Clôturée le : </span>{new Date(crisis.closed_at).toLocaleString('fr-FR')}</p>}
-      {crisis.notes && <p><span className="text-gray-500">Notes : </span>{crisis.notes}</p>}
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-sm text-gray-800 mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function SyntheseTab({ crisis }: { crisis: Crisis }) {
+  const duration = crisis.closed_at ? formatDuration(crisis.opened_at, crisis.closed_at) : null;
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        <h3 className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Impacts de l'incident</h3>
+        <p className="text-sm text-gray-800">{crisis.description || '—'}</p>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm p-4 grid grid-cols-2 md:grid-cols-3 gap-4">
+        <InfoField label="Nature" value={crisis.incident_kind ? (INCIDENT_KIND_LABELS[crisis.incident_kind] || crisis.incident_kind) : '—'} />
+        <InfoField label="Services impactés" value={crisis.services_impactes || '—'} />
+        <InfoField label="Ouverte le" value={new Date(crisis.opened_at).toLocaleString('fr-FR')} />
+        <InfoField label="Clôturée le" value={crisis.closed_at ? new Date(crisis.closed_at).toLocaleString('fr-FR') : 'En cours'} />
+        <InfoField label="Durée" value={duration || '—'} />
+      </div>
+
+      {crisis.notes && (
+        <div className="bg-white rounded-lg shadow-sm p-4">
+          <h3 className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Notes</h3>
+          <p className="text-sm text-gray-800 whitespace-pre-wrap">{crisis.notes}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -441,6 +493,120 @@ function TranscriptView({ transcript }: { transcript: string }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+const MAILBOX_VERDICT_LABELS: Record<string, string> = {
+  compromise_likely: 'Compromission probable',
+  signals_to_check: 'Signaux à vérifier',
+  no_strong_signal: 'RAS',
+};
+const MAILBOX_VERDICT_STYLES: Record<string, string> = {
+  compromise_likely: 'bg-red-100 text-red-700',
+  signals_to_check: 'bg-amber-100 text-amber-700',
+  no_strong_signal: 'bg-green-100 text-green-700',
+};
+
+function MailboxesTab({ crisisId }: { crisisId: number }) {
+  const [mailboxes, setMailboxes] = useState<CrisisMailbox[]>([]);
+  const [email, setEmail] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [refreshingId, setRefreshingId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() { api.get(`/crises/${crisisId}/mailboxes`).then((r) => setMailboxes(r.data)); }
+  useEffect(load, [crisisId]);
+
+  async function addMailbox(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setAdding(true); setError(null);
+    try {
+      await api.post(`/crises/${crisisId}/mailboxes`, { email: email.trim() });
+      setEmail('');
+      load();
+    } catch (e) { setError((e as Error).message); } finally { setAdding(false); }
+  }
+
+  async function refresh(id: number) {
+    setRefreshingId(id); setError(null);
+    try {
+      await api.post(`/crises/${crisisId}/mailboxes/${id}/refresh`);
+      load();
+    } catch (e) { setError((e as Error).message); } finally { setRefreshingId(null); }
+  }
+
+  async function remove(id: number) {
+    try {
+      await api.delete(`/crises/${crisisId}/mailboxes/${id}`);
+      load();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+        <h3 className="font-medium text-sm">Boîtes mail concernées</h3>
+        <p className="text-xs text-gray-500">
+          Ajoutez chaque adresse impactée : la synthèse (verdict, score, signaux, analyse IA) est
+          automatiquement récupérée depuis Analyse Mail.
+        </p>
+        <form onSubmit={addMailbox} className="flex gap-2">
+          <input
+            type="email"
+            className="flex-1 border rounded px-3 py-2 text-sm"
+            placeholder="prenom.nom@ivry94.fr"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+          <button disabled={adding} className="bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark disabled:opacity-60">
+            {adding ? 'Ajout…' : 'Ajouter et analyser'}
+          </button>
+        </form>
+        {error && <div className="text-red-600 text-sm">{error}</div>}
+      </div>
+
+      {mailboxes.map((m) => (
+        <div key={m.id} className="bg-white rounded-lg shadow-sm p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-sm">{m.email}</span>
+              {m.verdict && (
+                <span className={`text-xs px-2 py-0.5 rounded ${MAILBOX_VERDICT_STYLES[m.verdict] || 'bg-gray-100 text-gray-600'}`}>
+                  {MAILBOX_VERDICT_LABELS[m.verdict] || m.verdict}
+                </span>
+              )}
+              {m.score != null && <span className="text-xs text-gray-400">Score {m.score}/10</span>}
+            </div>
+            <div className="flex items-center gap-3">
+              {m.fetched_at && <span className="text-xs text-gray-400">Actualisé le {new Date(m.fetched_at).toLocaleString('fr-FR')}</span>}
+              <button onClick={() => refresh(m.id)} disabled={refreshingId === m.id} className="text-xs text-ville hover:underline disabled:opacity-60">
+                {refreshingId === m.id ? 'Actualisation…' : 'Actualiser'}
+              </button>
+              <button onClick={() => remove(m.id)} className="text-xs text-gray-400 hover:text-red-600">Retirer</button>
+            </div>
+          </div>
+          {m.fetch_error && <div className="text-xs text-red-600">{m.fetch_error}</div>}
+          {m.findings && m.findings.length > 0 && (
+            <ul className="text-xs text-gray-600 list-disc list-inside space-y-0.5">
+              {m.findings.map((f, i) => <li key={i}><span className="font-medium">{f.title}</span> — {f.description}</li>)}
+            </ul>
+          )}
+          {m.ai_analysis ? (
+            <div className="border-t pt-2 mt-2">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">
+                Synthèse IA (Analyse Mail{m.ai_analysis_model ? ` — ${m.ai_analysis_model}` : ''})
+              </p>
+              <div className="rendered-content text-sm" dangerouslySetInnerHTML={{ __html: markdownToHtml(m.ai_analysis) }} />
+            </div>
+          ) : (
+            !m.fetch_error && !m.verdict && <p className="text-xs text-gray-400">Récupération en cours ou aucune donnée disponible.</p>
+          )}
+        </div>
+      ))}
+      {mailboxes.length === 0 && <p className="text-sm text-gray-400 px-1">Aucune boîte mail associée à cette crise.</p>}
     </div>
   );
 }

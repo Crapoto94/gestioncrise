@@ -4,11 +4,18 @@
 // REFERENTIELS/INCIDENTS MAJEURS) : en-tête, chronologie, communication
 // réalisée (interne/externe), actions à réaliser (court/moyen-long terme),
 // notes — pour que l'export ressemble à un document déjà connu des équipes.
+const fs = require('fs');
+const path = require('path');
 const PDFDocument = require('pdfkit');
-const { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType } = require('docx');
+const { Document, Packer, Paragraph, HeadingLevel, TextRun, Table, TableRow, TableCell, WidthType, ImageRun, AlignmentType } = require('docx');
 const crisesRepo = require('../crises/crises.repository');
 const communicationsRepo = require('../communications/communications.repository');
+const mailboxesRepo = require('../crises/mailboxes.repository');
 const { HttpError } = require('../../middlewares/errorHandler');
+
+const LOGO_PATH = path.join(__dirname, '..', '..', 'assets', 'logo-ivry.jpg');
+const logoBuffer = fs.existsSync(LOGO_PATH) ? fs.readFileSync(LOGO_PATH) : null;
+const logoBase64 = logoBuffer ? logoBuffer.toString('base64') : null;
 
 const INCIDENT_KIND_LABELS = { interruption: 'Interruption de service', degradation: 'Dégradation de service' };
 const HORIZON_LABELS = { court_terme: 'À court terme', moyen_long_terme: 'À moyen / long terme' };
@@ -16,13 +23,14 @@ const HORIZON_LABELS = { court_terme: 'À court terme', moyen_long_terme: 'À mo
 async function gatherCrisisReportData(crisisId) {
   const crisis = await crisesRepo.findById(crisisId);
   if (!crisis) throw new HttpError(404, 'Crise introuvable');
-  const [events, decisions, members, communications] = await Promise.all([
+  const [events, decisions, members, communications, mailboxes] = await Promise.all([
     crisesRepo.listEvents(crisisId),
     crisesRepo.listDecisions(crisisId),
     crisesRepo.listMembers(crisisId),
     communicationsRepo.listByCrisis(crisisId),
+    crisis.type === 'compromission_mail' ? mailboxesRepo.listByCrisis(crisisId) : Promise.resolve([]),
   ]);
-  return { crisis, events, decisions, members, communications };
+  return { crisis, events, decisions, members, communications, mailboxes };
 }
 
 function formatDate(d) {
@@ -62,8 +70,20 @@ function commLine(c) {
   return `[${formatDate(c.created_at)}] (${c.channel}) ${c.subject ? `${c.subject} — ` : ''}${c.content}`;
 }
 
+const MAILBOX_VERDICT_LABELS = {
+  compromise_likely: 'Compromission probable',
+  signals_to_check: 'Signaux à vérifier',
+  no_strong_signal: 'RAS',
+};
+
+function mailboxLine(m) {
+  const verdict = m.verdict ? (MAILBOX_VERDICT_LABELS[m.verdict] || m.verdict) : 'non analysée';
+  const score = m.score != null ? ` (score ${m.score}/10)` : '';
+  return `${m.email} — ${verdict}${score}`;
+}
+
 /** Rapport HTML autonome (CSS inliné, aucune dépendance externe). */
-function buildHtmlReport({ crisis, events, decisions, members, communications }) {
+function buildHtmlReport({ crisis, events, decisions, members, communications, mailboxes = [] }) {
   const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const byHorizon = splitByHorizon(decisions);
   const byDirection = splitByDirection(communications);
@@ -87,7 +107,9 @@ function buildHtmlReport({ crisis, events, decisions, members, communications })
   .badge { display: inline-block; padding: .1rem .5rem; border-radius: .25rem; background: #eee; font-size: .8rem; }
   .cols { display: flex; gap: 1.5rem; } .cols > div { flex: 1; }
   ul { margin: 0; padding-left: 1.2rem; }
+  .header-logo { max-height: 60px; margin-bottom: 1rem; }
 </style></head><body>
+${logoBase64 ? `<img class="header-logo" src="data:image/png;base64,${logoBase64}" alt="Ville d'Ivry-sur-Seine">` : ''}
 <h1>Compte-rendu d'incident : ${esc(crisis.title)}</h1>
 <p><span class="badge">Type: ${esc(crisis.type)}</span>
    <span class="badge">Sévérité: ${esc(crisis.severity)}</span>
@@ -101,6 +123,11 @@ function buildHtmlReport({ crisis, events, decisions, members, communications })
 </table>
 <h2>Impacts de l'incident</h2>
 <p>${esc(crisis.description || '—')}</p>
+
+${mailboxes.length ? `<h2>Boîtes mail concernées</h2>
+<table><tr><th>Adresse</th><th>Verdict</th><th>Synthèse IA</th></tr>
+${mailboxes.map((m) => `<tr><td>${esc(m.email)}</td><td>${esc(m.verdict ? (MAILBOX_VERDICT_LABELS[m.verdict] || m.verdict) : 'non analysée')}${m.score != null ? ` (${esc(m.score)}/10)` : ''}</td><td>${esc((m.ai_analysis || '—').slice(0, 400))}</td></tr>`).join('')}
+</table>` : ''}
 
 <h2>Cellule de crise</h2>
 <table><tr><th>Agent</th><th>Rôle</th></tr>
@@ -132,7 +159,7 @@ ${events.map((e) => `<tr><td>${formatDate(e.created_at)}</td><td>${esc(e.event_t
 }
 
 /** Rapport PDF (pdfkit) — retourne un Buffer. */
-function buildPdfReport({ crisis, events, decisions, members, communications }) {
+function buildPdfReport({ crisis, events, decisions, members, communications, mailboxes = [] }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 50 });
     const chunks = [];
@@ -143,6 +170,7 @@ function buildPdfReport({ crisis, events, decisions, members, communications }) 
     const byDirection = splitByDirection(communications);
     const section = (title) => { doc.moveDown(); doc.fontSize(14).fillColor('#0055A4').text(title); doc.moveDown(0.3); doc.fontSize(10).fillColor('black'); };
 
+    if (logoBuffer) { doc.image(logoBuffer, { height: 45 }); doc.moveDown(0.5); }
     doc.fontSize(18).fillColor('#0055A4').text(`Compte-rendu d'incident : ${crisis.title}`);
     doc.moveDown(0.5);
     doc.fontSize(10).fillColor('black')
@@ -152,6 +180,11 @@ function buildPdfReport({ crisis, events, decisions, members, communications }) 
 
     section('Impacts de l\'incident');
     doc.text(crisis.description || '—');
+
+    if (mailboxes.length) {
+      section('Boîtes mail concernées');
+      mailboxes.forEach((m) => doc.text(`• ${mailboxLine(m)}`));
+    }
 
     section('Cellule de crise');
     members.forEach((m) => doc.text(`• ${m.display_name || m.username} — ${m.cell_role || ''}`));
@@ -183,7 +216,7 @@ function buildPdfReport({ crisis, events, decisions, members, communications }) 
 }
 
 /** Rapport DOCX (docx) — retourne un Buffer. */
-async function buildDocxReport({ crisis, events, decisions, members, communications }) {
+async function buildDocxReport({ crisis, events, decisions, members, communications, mailboxes = [] }) {
   const heading = (text) => new Paragraph({ text, heading: HeadingLevel.HEADING_2 });
   const subheading = (text) => new Paragraph({ text, heading: HeadingLevel.HEADING_3 });
   const bullet = (text) => new Paragraph({ text, bullet: { level: 0 } });
@@ -200,9 +233,14 @@ async function buildDocxReport({ crisis, events, decisions, members, communicati
     ],
   });
 
+  const logoParagraph = logoBuffer
+    ? new Paragraph({ alignment: AlignmentType.LEFT, children: [new ImageRun({ data: logoBuffer, transformation: { width: 90, height: 90 }, type: 'jpg' })] })
+    : null;
+
   const doc = new Document({
     sections: [{
       children: [
+        ...(logoParagraph ? [logoParagraph] : []),
         new Paragraph({ text: `Compte-rendu d'incident : ${crisis.title}`, heading: HeadingLevel.HEADING_1 }),
         new Paragraph({ children: [new TextRun(`Type: ${crisis.type} | Sévérité: ${crisis.severity} | Statut: ${crisis.status}${crisis.incident_kind ? ` | ${INCIDENT_KIND_LABELS[crisis.incident_kind] || crisis.incident_kind}` : ''}`)] }),
         new Paragraph({ text: `Début: ${formatDate(crisis.opened_at)} — Fin: ${crisis.closed_at ? formatDate(crisis.closed_at) : 'en cours'} — Durée: ${formatDuration(crisis.opened_at, crisis.closed_at)}` }),
@@ -210,6 +248,8 @@ async function buildDocxReport({ crisis, events, decisions, members, communicati
 
         heading("Impacts de l'incident"),
         new Paragraph(crisis.description || '—'),
+
+        ...(mailboxes.length ? [heading('Boîtes mail concernées'), ...mailboxes.map((m) => bullet(mailboxLine(m)))] : []),
 
         heading('Cellule de crise'),
         ...(members.length ? members.map((m) => bullet(`${m.display_name || m.username} — ${m.cell_role || ''}`)) : [new Paragraph('Aucun membre.')]),

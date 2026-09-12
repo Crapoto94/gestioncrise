@@ -39,4 +39,9 @@ router.get('/:id/members', controller.listMembers);
 router.post('/:id/members', auditLog('crisis_members'), controller.addMember);
 router.delete('/:id/members/:userId', auditLog('crisis_members'), controller.removeMember);
 
+router.get('/:id/mailboxes', controller.listMailboxes);
+router.post('/:id/mailboxes', auditLog('crisis_mailboxes'), controller.addMailbox);
+router.post('/:id/mailboxes/:mailboxId/refresh', auditLog('crisis_mailboxes'), controller.refreshMailbox);
+router.delete('/:id/mailboxes/:mailboxId', auditLog('crisis_mailboxes'), controller.removeMailbox);
+
 module.exports = router;

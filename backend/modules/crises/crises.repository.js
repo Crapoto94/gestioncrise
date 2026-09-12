@@ -54,7 +54,11 @@ const saveIaAnalysis = (id, { analysis, model }) =>
   );
 
 const setStatus = (id, status) => {
-  const closedAtClause = status === 'cloturee' ? ', closed_at = now()' : '';
+  // COALESCE : ne fixe closed_at à maintenant que s'il n'a pas déjà été
+  // renseigné manuellement (ex. backfill d'une crise historique, ou édition
+  // de la date de clôture avant de cliquer "Étape suivante") — sinon on
+  // écraserait systématiquement une date de clôture explicite.
+  const closedAtClause = status === 'cloturee' ? ', closed_at = COALESCE(closed_at, now())' : '';
   return db.get(
     `UPDATE pgc.crises SET status = $1, updated_at = now() ${closedAtClause} WHERE id = $2 RETURNING *`,
     [status, id]

@@ -1,39 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Search, MessagesSquare, X } from 'lucide-react';
 import { api } from '../services/api';
 import { SeverityBadge, StatusBadge } from '../components/StatusBadge';
-import type { Crisis, CrisisType, Severity, TeamsThreadResult } from '../types';
-
-// Taxonomie unifiée avec les fiches réflexes du PCGCN (Tome 2) — deux
-// familles distinctes : toute crise informatique n'est pas une crise cyber.
-const TYPE_LABELS: Record<CrisisType, string> = {
-  cyberattaque: 'Cyberattaque',
-  ransomware: 'Ransomware',
-  ddos: 'Déni de service (DDoS)',
-  defacement: 'Défacement / réseaux sociaux',
-  phishing: 'Phishing',
-  compromission_mail: 'Compromission mail',
-  fuite_donnees: 'Fuite de données',
-  panne_reseau: 'Panne réseau',
-  panne_applicative: 'Panne applicative',
-  panne_datacenter: 'Panne datacenter',
-  panne_electrique: 'Panne électrique',
-  sinistre_salle_serveur: 'Sinistre salle serveur',
-  cloud_saas: 'Cloud / SaaS',
-  telephonie: 'Téléphonie',
-  ecoles: 'Écoles',
-  police_municipale: 'Police municipale',
-  autre: 'Autre',
-};
+import { TYPE_LABELS, STATUS_LABELS } from '../constants/crisisTypes';
+import type { Crisis, CrisisType, CrisisStatus, Severity, TeamsThreadResult } from '../types';
 
 interface Family { label: string; types: CrisisType[] }
+
+const SEVERITY_ORDER: Record<Severity, number> = { faible: 0, moyenne: 1, haute: 2, critique: 3 };
+const SORT_OPTIONS = ['Plus récentes', 'Plus anciennes', 'Sévérité', 'Durée'] as const;
+type SortOption = typeof SORT_OPTIONS[number];
+
+function durationLabel(c: Crisis) {
+  if (!c.closed_at) return null;
+  const ms = new Date(c.closed_at).getTime() - new Date(c.opened_at).getTime();
+  if (ms <= 0) return null;
+  const hours = Math.floor(ms / 3_600_000);
+  const days = Math.floor(hours / 24);
+  return days > 0 ? `${days} j ${hours % 24} h` : `${hours} h`;
+}
+function durationHours(c: Crisis) {
+  if (!c.closed_at) return -1;
+  return (new Date(c.closed_at).getTime() - new Date(c.opened_at).getTime()) / 3_600_000;
+}
 
 export function Crises() {
   const [crises, setCrises] = useState<Crisis[]>([]);
   const [families, setFamilies] = useState<Record<string, Family>>({});
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<CrisisStatus | ''>('');
+  const [severityFilter, setSeverityFilter] = useState<Severity | ''>('');
+  const [familyFilter, setFamilyFilter] = useState('');
+  const [sort, setSort] = useState<SortOption>('Plus récentes');
 
   function load() {
     api.get('/crises').then((r) => setCrises(r.data)).catch((e) => setError(e.message));
@@ -51,6 +53,29 @@ export function Crises() {
     }
   }
 
+  const filtered = useMemo(() => {
+    let list = crises.filter((c) => {
+      if (search && !c.title.toLowerCase().includes(search.toLowerCase())) return false;
+      if (statusFilter && c.status !== statusFilter) return false;
+      if (severityFilter && c.severity !== severityFilter) return false;
+      if (familyFilter && !(families[familyFilter]?.types || []).includes(c.type)) return false;
+      return true;
+    });
+    list = [...list].sort((a, b) => {
+      if (sort === 'Plus récentes') return new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime();
+      if (sort === 'Plus anciennes') return new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime();
+      if (sort === 'Sévérité') return SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity];
+      return durationHours(b) - durationHours(a);
+    });
+    return list;
+  }, [crises, search, statusFilter, severityFilter, familyFilter, sort, families]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of crises) counts[c.status] = (counts[c.status] || 0) + 1;
+    return counts;
+  }, [crises]);
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -62,7 +87,40 @@ export function Crises() {
       {error && <div className="text-red-600 text-sm">{error}</div>}
       {showForm && <NewCrisisForm families={families} onSubmit={createCrisis} onCancel={() => setShowForm(false)} />}
 
-      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+      <div className="flex flex-wrap gap-2 text-xs">
+        {(Object.keys(STATUS_LABELS) as CrisisStatus[]).map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(statusFilter === s ? '' : s)}
+            className={`px-2.5 py-1 rounded-full border ${statusFilter === s ? 'bg-ville text-white border-ville' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
+          >
+            {STATUS_LABELS[s]} <span className="opacity-70">({statusCounts[s] || 0})</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm p-3 flex flex-wrap gap-2 items-center">
+        <input
+          className="border rounded px-3 py-1.5 text-sm flex-1 min-w-[180px]"
+          placeholder="Rechercher un titre…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className="border rounded px-2 py-1.5 text-sm" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value as Severity | '')}>
+          <option value="">Toutes sévérités</option>
+          {['faible', 'moyenne', 'haute', 'critique'].map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select className="border rounded px-2 py-1.5 text-sm" value={familyFilter} onChange={(e) => setFamilyFilter(e.target.value)}>
+          <option value="">Toutes familles</option>
+          {Object.entries(families).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+        </select>
+        <select className="border rounded px-2 py-1.5 text-sm" value={sort} onChange={(e) => setSort(e.target.value as SortOption)}>
+          {SORT_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span className="text-xs text-gray-400 ml-auto">{filtered.length} / {crises.length} crise(s)</span>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm overflow-hidden overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-left">
             <tr>
@@ -71,10 +129,11 @@ export function Crises() {
               <th className="p-3">Sévérité</th>
               <th className="p-3">Statut</th>
               <th className="p-3">Ouverte le</th>
+              <th className="p-3">Durée</th>
             </tr>
           </thead>
           <tbody>
-            {crises.map((c) => (
+            {filtered.map((c) => (
               <tr key={c.id} className="border-t hover:bg-gray-50">
                 <td className="p-3">
                   <Link to={`/crises/${c.id}`} className="text-ville hover:underline">{c.title}</Link>
@@ -82,11 +141,12 @@ export function Crises() {
                 <td className="p-3">{TYPE_LABELS[c.type] || c.type}</td>
                 <td className="p-3"><SeverityBadge severity={c.severity} /></td>
                 <td className="p-3"><StatusBadge status={c.status} /></td>
-                <td className="p-3 text-gray-500">{new Date(c.opened_at).toLocaleString('fr-FR')}</td>
+                <td className="p-3 text-gray-500">{new Date(c.opened_at).toLocaleDateString('fr-FR')}</td>
+                <td className="p-3 text-gray-500">{durationLabel(c) || (c.closed_at ? '—' : 'en cours')}</td>
               </tr>
             ))}
-            {crises.length === 0 && (
-              <tr><td colSpan={5} className="p-6 text-center text-gray-400">Aucune crise enregistrée.</td></tr>
+            {filtered.length === 0 && (
+              <tr><td colSpan={6} className="p-6 text-center text-gray-400">Aucune crise ne correspond aux filtres.</td></tr>
             )}
           </tbody>
         </table>

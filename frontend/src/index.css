@@ -6,9 +6,17 @@ body {
   @apply bg-gray-50 text-gray-900;
 }
 
-/* Rendu du markdown léger des rubriques PCGCN (voir utils/markdown.ts) */
-.rendered-content h3 { @apply text-base font-semibold mt-2 mb-1; }
-.rendered-content h4 { @apply text-sm font-semibold mt-2 mb-1; }
-.rendered-content h5 { @apply text-sm font-medium mt-1 mb-1; }
-.rendered-content p { @apply mb-2; }
-.rendered-content ul { @apply list-disc list-inside mb-2; }
+/* Rendu du markdown léger des rubriques PCGCN et des synthèses IA (voir
+   utils/markdown.ts) — pensé pour rester lisible sur un long texte généré
+   (synthèse de crise, RETEX, analyse IA), pas seulement une courte fiche. */
+.rendered-content { @apply leading-relaxed text-gray-800; }
+.rendered-content h3 { @apply text-lg font-semibold text-ville mt-4 mb-2 first:mt-0; }
+.rendered-content h4 { @apply text-base font-semibold text-gray-800 mt-3 mb-1.5 first:mt-0; }
+.rendered-content h5 { @apply text-sm font-semibold text-gray-700 uppercase tracking-wide mt-2 mb-1 first:mt-0; }
+.rendered-content p { @apply mb-2.5; }
+.rendered-content ul { @apply list-disc list-outside ml-5 mb-2.5 space-y-0.5; }
+.rendered-content li { @apply pl-0.5; }
+.rendered-content strong { @apply font-semibold text-gray-900; }
+.rendered-content em { @apply italic; }
+.rendered-content a { @apply text-ville underline hover:text-ville-dark; }
+.rendered-content > *:last-child { @apply mb-0; }

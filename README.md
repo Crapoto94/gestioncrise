@@ -40,7 +40,26 @@ canal Teams où se déroulent les crises réelles. Sur une fiche crise, l'onglet
    Traitement asynchrone (jobId + poll), une génération peut prendre 1-2 min.
 3. Le **prompt** utilisé est éditable dans **Admin → Analyse IA des crises**
    (persisté dans `pgc.app_settings`, clé `crisis_ia_prompt`), avec les
-   placeholders `{TITRE}` `{TYPE}` `{SEVERITE}` `{TRANSCRIPTION}`.
+   placeholders `{TITRE}` `{TYPE}` `{SEVERITE}` `{TRANSCRIPTION}`. La réponse
+   attendue comporte une synthèse Markdown puis un bloc ```json
+   (`chronologie` / `actions`) qui alimente automatiquement la main courante
+   et les décisions de la crise (source `ia`, jamais dupliqué d'une
+   ré-analyse à l'autre — voir `crises.controller.js:startAnalysis`).
+4. Un fil Teams peut aussi être associé **dès la création** de la crise
+   (recherche intégrée au formulaire), et le transcript peut être
+   **actualisé** à tout moment depuis l'onglet.
+
+### Crises de type compromission mail → boîtes concernées
+
+Pour une crise de type `compromission_mail`, un onglet **Boîtes mail**
+apparaît : on y liste les adresses impactées, et la synthèse (verdict,
+score, signaux détectés, synthèse IA déjà générée) est récupérée
+automatiquement depuis l'application **Analyse Mail**
+(`backend/services/analyseMail.js`, endpoints `GET /api/v1/boites`,
+`GET /api/v1/boites/<id>`, `GET /api/v1/monitored-mailboxes` — clé
+`X-API-Key` dans `ANALYSEMAIL_API_KEY`). Le filtrage par adresse est
+refait côté client même si le serveur le supporte déjà, pour ne jamais
+attribuer par erreur les signaux d'une autre boîte.
 
 ## PCGCN — Plan Communal de Gestion de Crise Numérique
 

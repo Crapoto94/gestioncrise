@@ -1,7 +1,9 @@
 const repo = require('./crises.repository');
 const service = require('./crises.service');
+const mailboxesRepo = require('./mailboxes.repository');
 const graph = require('../../services/graph');
 const ia = require('../../services/ia');
+const analyseMail = require('../../services/analyseMail');
 const settingsRepo = require('../admin/settings.repository');
 const { HttpError } = require('../../middlewares/errorHandler');
 
@@ -246,9 +248,64 @@ function getAnalysisStatus(req, res) {
   res.json(job);
 }
 
+// --- Boîtes mail concernées (crises compromission_mail/phishing) ----------
+// Récupère la synthèse (verdict/score/signaux + synthèse IA déjà générée)
+// depuis Analyse Mail pour une boîte de la crise, et l'enregistre. Ne lève
+// jamais — une indisponibilité d'Analyse Mail ne doit pas bloquer l'ajout
+// de la boîte, juste laisser fetch_error visible pour un nouvel essai.
+async function refreshMailboxSynthese(mailbox) {
+  try {
+    const synthese = await analyseMail.getSyntheseForEmail(mailbox.email);
+    if (!synthese) {
+      return mailboxesRepo.saveFetchError(mailbox.id, "Aucune donnée trouvée dans Analyse Mail pour cette adresse.");
+    }
+    return mailboxesRepo.saveSynthese(mailbox.id, {
+      verdict: synthese.verdict,
+      score: synthese.score,
+      findings: synthese.findings,
+      aiAnalysis: synthese.aiAnalysis,
+      aiAnalysisModel: synthese.aiAnalysisModel,
+      aiAnalysisAt: synthese.aiAnalysisAt,
+      source: synthese.source,
+    });
+  } catch (err) {
+    return mailboxesRepo.saveFetchError(mailbox.id, err.message);
+  }
+}
+
+async function listMailboxes(req, res, next) {
+  try { res.json(await mailboxesRepo.listByCrisis(Number(req.params.id))); } catch (err) { next(err); }
+}
+
+async function addMailbox(req, res, next) {
+  try {
+    const email = (req.body.email || '').trim();
+    if (!email || !email.includes('@')) throw new HttpError(400, 'Adresse mail invalide');
+    const mailbox = await mailboxesRepo.addMailbox(Number(req.params.id), email, req.user.id);
+    const updated = await refreshMailboxSynthese(mailbox);
+    res.status(201).json(updated);
+  } catch (err) { next(err); }
+}
+
+async function refreshMailbox(req, res, next) {
+  try {
+    const mailbox = await mailboxesRepo.findById(Number(req.params.mailboxId));
+    if (!mailbox || mailbox.crisis_id !== Number(req.params.id)) throw new HttpError(404, 'Boîte introuvable');
+    res.json(await refreshMailboxSynthese(mailbox));
+  } catch (err) { next(err); }
+}
+
+async function removeMailbox(req, res, next) {
+  try {
+    await mailboxesRepo.removeMailbox(Number(req.params.mailboxId));
+    res.status(204).end();
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   list, getOne, create, update, transition, listFamilies,
   listEvents, addEvent, listDecisions, addDecision, updateDecision,
   listMembers, addMember, removeMember,
   searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus,
+  listMailboxes, addMailbox, refreshMailbox, removeMailbox,
 };

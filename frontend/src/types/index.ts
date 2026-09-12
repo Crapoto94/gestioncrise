@@ -37,6 +37,33 @@ export interface Crisis {
   notes?: string | null;
 }
 
+export interface CrisisMailboxFinding { severity: string; title: string; description: string }
+
+export interface CrisisMailbox {
+  id: number;
+  crisis_id: number;
+  email: string;
+  verdict: string | null;
+  score: number | null;
+  findings: CrisisMailboxFinding[] | null;
+  ai_analysis: string | null;
+  ai_analysis_model: string | null;
+  ai_analysis_at: string | null;
+  source: 'boite_compromise' | 'surveillance' | null;
+  fetch_error: string | null;
+  fetched_at: string | null;
+  created_at: string;
+}
+
+export interface DashboardHistorique {
+  totalCrises: number;
+  closedCrises: number;
+  avgResolutionHours: number | null;
+  crisesByType: { type: string; count: number }[];
+  crisesByFamily: { key: string; label: string; count: number }[];
+  crisesByYear: { year: number; count: number }[];
+}
+
 export interface TeamsThreadResult {
   id: string;
   date: string;

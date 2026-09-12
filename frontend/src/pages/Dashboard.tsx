@@ -2,13 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { SeverityBadge, StatusBadge } from '../components/StatusBadge';
-import type { Crisis, CrisisDecision, PcaActivity } from '../types';
+import { BarList } from '../components/BarList';
+import { TYPE_LABELS } from '../constants/crisisTypes';
+import type { Crisis, CrisisDecision, PcaActivity, DashboardHistorique } from '../types';
 
 interface Summary {
   crisesBySeverity: { severity: string; count: number }[];
   activeCrises: Crisis[];
   degradedPca: PcaActivity[];
   recentDecisions: (CrisisDecision & { crisis_title: string })[];
+  historique: DashboardHistorique;
 }
 
 export function Dashboard() {
@@ -80,8 +83,55 @@ export function Dashboard() {
               ))}
             </ul>
           </section>
+
+          <HistoriqueSection historique={summary.historique} />
         </>
       )}
     </div>
+  );
+}
+
+function HistoriqueSection({ historique: h }: { historique: DashboardHistorique }) {
+  const byTypeItems = h.crisesByType.map((t) => ({ label: TYPE_LABELS[t.type] || t.type, count: t.count }));
+  const byFamilyItems = h.crisesByFamily.map((f) => ({ label: f.label, count: f.count }));
+  const byYearItems = h.crisesByYear.map((y) => ({ label: String(y.year), count: y.count }));
+
+  return (
+    <section className="space-y-4">
+      <h2 className="text-lg font-semibold">Analyse des crises passées</h2>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-lg shadow-sm p-4">
+          <div className="text-sm text-gray-500">Total des crises enregistrées</div>
+          <div className="text-3xl font-semibold">{h.totalCrises}</div>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm p-4">
+          <div className="text-sm text-gray-500">Crises clôturées</div>
+          <div className="text-3xl font-semibold">{h.closedCrises}</div>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm p-4">
+          <div className="text-sm text-gray-500">Durée moyenne de résolution</div>
+          <div className="text-3xl font-semibold">
+            {h.avgResolutionHours != null ? `${h.avgResolutionHours < 24 ? `${h.avgResolutionHours} h` : `${(h.avgResolutionHours / 24).toFixed(1)} j`}` : '—'}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-6">
+        <div className="bg-white rounded-lg shadow-sm p-4">
+          <h3 className="font-medium mb-3 text-sm">Par famille</h3>
+          <BarList items={byFamilyItems} color="bg-ville" />
+        </div>
+        <div className="bg-white rounded-lg shadow-sm p-4">
+          <h3 className="font-medium mb-3 text-sm">Par année d'ouverture</h3>
+          <BarList items={byYearItems} color="bg-amber-500" />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        <h3 className="font-medium mb-3 text-sm">Par type de crise</h3>
+        <BarList items={byTypeItems} color="bg-slate-500" />
+      </div>
+    </section>
   );
 }

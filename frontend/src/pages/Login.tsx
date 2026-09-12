@@ -27,6 +27,7 @@ export function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <form onSubmit={onSubmit} className="bg-white shadow-md rounded-lg p-8 w-full max-w-sm space-y-4">
+        <img src="/logo-ivry.jpg" alt="Ville d'Ivry-sur-Seine" className="mx-auto h-14 w-auto" />
         <h1 className="text-xl font-semibold text-ville text-center">PGC — Gestion de Crise</h1>
         <p className="text-xs text-gray-500 text-center">
           Identifiants Ville (AD). En cas d'indisponibilité de l'AD, un compte

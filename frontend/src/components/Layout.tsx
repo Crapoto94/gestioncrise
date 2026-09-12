@@ -27,8 +27,11 @@ export function Layout() {
   return (
     <div className="flex min-h-screen">
       <aside className="w-64 bg-ville-dark text-white flex flex-col shrink-0">
-        <div className="p-4 text-lg font-semibold border-b border-white/10">
-          PGC — Gestion de Crise
+        <div className="p-4 border-b border-white/10">
+          <div className="bg-white rounded p-2 inline-block">
+            <img src="/logo-ivry.jpg" alt="Ville d'Ivry-sur-Seine" className="h-8 w-auto" />
+          </div>
+          <div className="text-lg font-semibold mt-2">PGC — Gestion de Crise</div>
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {MENU.filter((item) => !item.roles || hasRole(...item.roles)).map(({ to, label, icon: Icon, end }) => (
