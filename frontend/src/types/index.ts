@@ -7,9 +7,12 @@ export interface AuthUser {
   roles: Role[];
 }
 
+// Taxonomie unifiée avec les fiches réflexes du PCGCN — famille sécurité
+// (cyber/malveillance) vs technique/opérationnel (non-cyber) vs transverse.
 export type CrisisType =
-  | 'panne_reseau' | 'panne_applicative' | 'compromission_mail'
-  | 'phishing' | 'fuite_donnees' | 'ransomware' | 'autre';
+  | 'cyberattaque' | 'ransomware' | 'ddos' | 'defacement' | 'phishing' | 'compromission_mail' | 'fuite_donnees'
+  | 'panne_reseau' | 'panne_applicative' | 'panne_datacenter' | 'panne_electrique' | 'sinistre_salle_serveur' | 'cloud_saas' | 'telephonie'
+  | 'ecoles' | 'police_municipale' | 'autre';
 
 export type CrisisStatus = 'detection' | 'qualification' | 'cellule' | 'resolution' | 'retex' | 'cloturee';
 export type Severity = 'faible' | 'moyenne' | 'haute' | 'critique';

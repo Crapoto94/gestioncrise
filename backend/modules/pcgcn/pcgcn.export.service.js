@@ -23,20 +23,24 @@ const SECTION_TITLES = {
   annexes: 'Annexes',
 };
 
+// Taxonomie unifiée avec pgc.crises.type (voir backend/modules/crises/crises.service.js)
+// + `rgpd`, volet procédural sans crise dédiée (rattaché à fuite_donnees).
 const FICHE_TYPE_LABELS = {
   cyberattaque: 'Cyberattaque',
   ransomware: 'Ransomware',
   ddos: 'Déni de service (DDoS)',
   defacement: 'Défacement / réseaux sociaux',
-  m365: 'Microsoft 365',
+  phishing: 'Phishing',
+  compromission_mail: 'Compromission mail',
   fuite_donnees: 'Fuite de données',
   rgpd: 'RGPD (violation de données)',
+  panne_reseau: 'Panne réseau',
+  panne_applicative: 'Panne applicative',
   panne_datacenter: 'Panne datacenter',
   panne_electrique: 'Panne électrique',
   sinistre_salle_serveur: 'Sinistre salle serveur',
   cloud_saas: 'Cloud / SaaS',
   telephonie: 'Téléphonie',
-  reseau: 'Réseau',
   ecoles: 'Écoles',
   police_municipale: 'Police municipale',
   autre: 'Autre',

@@ -5,7 +5,25 @@
 const repo = require('./crises.repository');
 const { HttpError } = require('../../middlewares/errorHandler');
 
-const CRISIS_TYPES = ['panne_reseau', 'panne_applicative', 'compromission_mail', 'phishing', 'fuite_donnees', 'ransomware', 'autre'];
+// Deux familles distinctes — toute crise informatique n'est pas une crise
+// cyber (cf. GUIDE et échanges DSI) : la famille détermine qui pilote par
+// défaut (RSSI côté sécurité, responsable du domaine technique côté panne),
+// voir PCGCN Tome 1 — Rôles pour l'organisation détaillée par gravité.
+const CRISIS_FAMILIES = {
+  securite: {
+    label: 'Sécurité (cyber / malveillance)',
+    types: ['cyberattaque', 'ransomware', 'ddos', 'defacement', 'phishing', 'compromission_mail', 'fuite_donnees'],
+  },
+  technique: {
+    label: 'Technique / opérationnel (non-cyber)',
+    types: ['panne_reseau', 'panne_applicative', 'panne_datacenter', 'panne_electrique', 'sinistre_salle_serveur', 'cloud_saas', 'telephonie'],
+  },
+  transverse: {
+    label: 'Transverse',
+    types: ['ecoles', 'police_municipale', 'autre'],
+  },
+};
+const CRISIS_TYPES = Object.values(CRISIS_FAMILIES).flatMap((f) => f.types);
 
 function assertValidType(type) {
   if (!CRISIS_TYPES.includes(type)) {
@@ -48,4 +66,4 @@ async function transitionStatus(crisisId, nextStatus, actorId) {
   return updated;
 }
 
-module.exports = { CRISIS_TYPES, assertValidType, createCrisis, transitionStatus, repo };
+module.exports = { CRISIS_TYPES, CRISIS_FAMILIES, assertValidType, createCrisis, transitionStatus, repo };

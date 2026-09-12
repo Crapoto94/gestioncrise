@@ -5,18 +5,33 @@ import { api } from '../services/api';
 import { SeverityBadge, StatusBadge } from '../components/StatusBadge';
 import type { Crisis, CrisisType, Severity } from '../types';
 
+// Taxonomie unifiée avec les fiches réflexes du PCGCN (Tome 2) — deux
+// familles distinctes : toute crise informatique n'est pas une crise cyber.
 const TYPE_LABELS: Record<CrisisType, string> = {
+  cyberattaque: 'Cyberattaque',
+  ransomware: 'Ransomware',
+  ddos: 'Déni de service (DDoS)',
+  defacement: 'Défacement / réseaux sociaux',
+  phishing: 'Phishing',
+  compromission_mail: 'Compromission mail',
+  fuite_donnees: 'Fuite de données',
   panne_reseau: 'Panne réseau',
   panne_applicative: 'Panne applicative',
-  compromission_mail: 'Compromission mail',
-  phishing: 'Phishing',
-  fuite_donnees: 'Fuite de données',
-  ransomware: 'Ransomware',
+  panne_datacenter: 'Panne datacenter',
+  panne_electrique: 'Panne électrique',
+  sinistre_salle_serveur: 'Sinistre salle serveur',
+  cloud_saas: 'Cloud / SaaS',
+  telephonie: 'Téléphonie',
+  ecoles: 'Écoles',
+  police_municipale: 'Police municipale',
   autre: 'Autre',
 };
 
+interface Family { label: string; types: CrisisType[] }
+
 export function Crises() {
   const [crises, setCrises] = useState<Crisis[]>([]);
+  const [families, setFamilies] = useState<Record<string, Family>>({});
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,6 +39,7 @@ export function Crises() {
     api.get('/crises').then((r) => setCrises(r.data)).catch((e) => setError(e.message));
   }
   useEffect(load, []);
+  useEffect(() => { api.get('/crises/families').then((r) => setFamilies(r.data)).catch(() => {}); }, []);
 
   async function createCrisis(form: { title: string; type: CrisisType; severity: Severity; description: string }) {
     try {
@@ -44,7 +60,7 @@ export function Crises() {
         </button>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
-      {showForm && <NewCrisisForm onSubmit={createCrisis} onCancel={() => setShowForm(false)} />}
+      {showForm && <NewCrisisForm families={families} onSubmit={createCrisis} onCancel={() => setShowForm(false)} />}
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <table className="w-full text-sm">
@@ -63,7 +79,7 @@ export function Crises() {
                 <td className="p-3">
                   <Link to={`/crises/${c.id}`} className="text-ville hover:underline">{c.title}</Link>
                 </td>
-                <td className="p-3">{TYPE_LABELS[c.type]}</td>
+                <td className="p-3">{TYPE_LABELS[c.type] || c.type}</td>
                 <td className="p-3"><SeverityBadge severity={c.severity} /></td>
                 <td className="p-3"><StatusBadge status={c.status} /></td>
                 <td className="p-3 text-gray-500">{new Date(c.opened_at).toLocaleString('fr-FR')}</td>
@@ -79,7 +95,8 @@ export function Crises() {
   );
 }
 
-function NewCrisisForm({ onSubmit, onCancel }: {
+function NewCrisisForm({ families, onSubmit, onCancel }: {
+  families: Record<string, Family>;
   onSubmit: (f: { title: string; type: CrisisType; severity: Severity; description: string }) => void;
   onCancel: () => void;
 }) {
@@ -87,6 +104,7 @@ function NewCrisisForm({ onSubmit, onCancel }: {
   const [type, setType] = useState<CrisisType>('panne_applicative');
   const [severity, setSeverity] = useState<Severity>('moyenne');
   const [description, setDescription] = useState('');
+  const hasFamilies = Object.keys(families).length > 0;
 
   return (
     <form
@@ -100,7 +118,15 @@ function NewCrisisForm({ onSubmit, onCancel }: {
       <div>
         <label className="block text-sm text-gray-600 mb-1">Type</label>
         <select className="w-full border rounded px-3 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value as CrisisType)}>
-          {Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          {hasFamilies ? (
+            Object.values(families).map((f) => (
+              <optgroup key={f.label} label={f.label}>
+                {f.types.map((t) => <option key={t} value={t}>{TYPE_LABELS[t] || t}</option>)}
+              </optgroup>
+            ))
+          ) : (
+            Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)
+          )}
         </select>
       </div>
       <div>

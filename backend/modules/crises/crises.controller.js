@@ -8,6 +8,11 @@ async function list(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/** Taxonomie des types de crise groupés par famille (sécurité/technique/transverse). */
+function listFamilies(req, res) {
+  res.json(service.CRISIS_FAMILIES);
+}
+
 async function getOne(req, res, next) {
   try {
     const crisis = await repo.findById(Number(req.params.id));
@@ -78,7 +83,7 @@ async function removeMember(req, res, next) {
 }
 
 module.exports = {
-  list, getOne, create, update, transition,
+  list, getOne, create, update, transition, listFamilies,
   listEvents, addEvent, listDecisions, addDecision, updateDecision,
   listMembers, addMember, removeMember,
 };
