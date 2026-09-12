@@ -1,0 +1,50 @@
+# PGC — Plateforme de Gestion de Crise
+# NB: le service `postgres` est fourni pour le DEV LOCAL uniquement. En
+# production, l'app se connecte au PostgreSQL partagé réel de la Ville
+# (changer POSTGRES_HOST/PORT/DB/USER/PASSWORD dans .env — aucun changement
+# de code nécessaire) et ce service peut être retiré du déploiement.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-ivry_admin}
+      - POSTGRES_USER=${POSTGRES_USER:-pgc_app}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme_dev_only}
+      - TZ=Europe/Paris
+    ports:
+      - "4612:5432"
+    volumes:
+      - pgc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pgc_app} -d ${POSTGRES_DB:-ivry_admin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: { context: ./backend }
+    restart: always
+    ports: ["4610:4610"]
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - POSTGRES_HOST=postgres
+    volumes:
+      - pgc_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - VITE_API_URL=${APP_API_URL:-http://localhost:4610}
+    restart: always
+    ports: ["4611:80"]
+    depends_on: [backend]
+
+volumes:
+  pgc_pgdata:
+  pgc_uploads:
