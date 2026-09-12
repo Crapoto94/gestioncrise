@@ -26,3 +26,23 @@ api.interceptors.response.use(
     return Promise.reject(new Error(message));
   }
 );
+
+/**
+ * Télécharge un fichier depuis une route authentifiée (`requireAuth`).
+ * Un simple `<a href={...}>` ne porte PAS le header Authorization (seules les
+ * requêtes passées par l'instance `api` l'ont) — d'où un "Authentification
+ * requise" sur toute route protégée ouverte en navigation directe. On
+ * récupère donc le fichier en Blob via `api`, puis on déclenche l'enregistrement
+ * via une URL objet temporaire.
+ */
+export async function downloadFile(path: string, filename: string) {
+  const res = await api.get(path, { responseType: 'blob' });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

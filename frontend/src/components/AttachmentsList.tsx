@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Paperclip, Trash2 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, downloadFile } from '../services/api';
 import type { PcgcnDocument } from '../types';
 
 /** Pièces jointes PDF génériques pour une rubrique/fiche/entrée d'annuaire du
@@ -42,7 +42,12 @@ export function AttachmentsList({ ownerType, ownerId, canEdit }: {
         {docs.map((d) => (
           <li key={d.id} className="flex items-center gap-2 text-xs">
             <Paperclip size={12} />
-            <a className="text-ville hover:underline" href={`${api.defaults.baseURL}/pcgcn/documents/file/${d.id}/download`}>{d.original_name}</a>
+            <button
+              className="text-ville hover:underline text-left"
+              onClick={() => downloadFile(`/pcgcn/documents/file/${d.id}/download`, d.original_name)}
+            >
+              {d.original_name}
+            </button>
             <span className="text-gray-400">{(d.size_bytes / 1024).toFixed(0)} Ko</span>
             {canEdit && (
               <button onClick={() => remove(d.id)} className="text-red-500 hover:text-red-700"><Trash2 size={12} /></button>

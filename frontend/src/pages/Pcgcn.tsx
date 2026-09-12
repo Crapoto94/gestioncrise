@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
+import { downloadFile } from '../services/api';
 import { Tome1 } from './pcgcn/Tome1';
 import { Tome2 } from './pcgcn/Tome2';
 import { Tome3 } from './pcgcn/Tome3';
@@ -21,14 +21,12 @@ export function Pcgcn() {
           <h1 className="text-2xl font-semibold">PCGCN</h1>
           <p className="text-sm text-gray-500">Plan Communal de Gestion de Crise Numérique</p>
         </div>
-        <a
-          href={`${api.defaults.baseURL}/pcgcn/export/html`}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          onClick={() => downloadFile('/pcgcn/export/html', 'PCGCN.html')}
           className="flex items-center gap-1 bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark"
         >
           <Download size={16} /> Exporter le PCGCN complet (HTML autonome)
-        </a>
+        </button>
       </div>
 
       <div className="border-b flex gap-4">

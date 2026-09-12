@@ -37,6 +37,41 @@ const getProjets = () => unwrap(client.get('/api/projets'), 'projets');
 const getTickets = () => unwrap(client.get('/api/tickets'), 'tickets');
 const getReunions = () => unwrap(client.get('/api/rencontres-reunions'), 'reunions');
 
+/**
+ * Encadrants Ville (DGA/directeurs/responsables de service et de secteur) —
+ * organigramme complet via /api/admin/rh/organisation-chart (endpoint réel,
+ * cf. projet `mandat` : direction > services[] > secteurs[], chaque nœud
+ * portant { code, label, responsable, responsable_poste, responsable_role,
+ * vacant }). Aplati ici en une liste plate avec le fil hiérarchique
+ * (chemin), plutôt que l'arbre brut — plus simple à consommer côté annuaire.
+ */
+async function getEncadrants() {
+  const tree = await unwrap(client.get('/api/admin/rh/organisation-chart'), 'organisation-chart');
+  return flattenEncadrants(Array.isArray(tree) ? tree : []);
+}
+
+const NIVEAU_PAR_PROFONDEUR = ['direction', 'service', 'secteur'];
+
+function flattenEncadrants(nodes, breadcrumb = [], depth = 0) {
+  const result = [];
+  for (const n of nodes || []) {
+    const chemin = [...breadcrumb, n.label].filter(Boolean).join(' > ');
+    result.push({
+      code: n.code,
+      unite: n.label,
+      niveau: NIVEAU_PAR_PROFONDEUR[depth] || 'secteur',
+      chemin,
+      responsable: n.responsable || null,
+      poste: n.responsable_poste || null,
+      role: n.responsable_role || null,
+      vacant: !!n.vacant,
+    });
+    if (n.services?.length) result.push(...flattenEncadrants(n.services, [...breadcrumb, n.label], depth + 1));
+    if (n.secteurs?.length) result.push(...flattenEncadrants(n.secteurs, [...breadcrumb, n.label], depth + 1));
+  }
+  return result;
+}
+
 async function ping() {
   if (!HUB_URL) return { ok: false, detail: 'HUBDSI_API_URL non configurée' };
   try {
@@ -49,5 +84,5 @@ async function ping() {
 
 module.exports = {
   getElus, getSites, getEcoles, getConfigVille, getDirectionsServices,
-  getAgentsDsi, getTasks, getProjets, getTickets, getReunions, ping,
+  getAgentsDsi, getTasks, getProjets, getTickets, getReunions, getEncadrants, ping,
 };

@@ -13,3 +13,4 @@ coverage/
 pgdata/
 .claude/settings.local.json
 *.tsbuildinfo
+backend/orgchart_sample.json

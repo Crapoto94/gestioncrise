@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, downloadFile } from '../services/api';
 import { SeverityBadge, StatusBadge } from '../components/StatusBadge';
 import { Timeline } from '../components/Timeline';
 import type { Crisis, CrisisEvent, CrisisDecision, CrisisDocument, CrisisCommunication } from '../types';
@@ -53,12 +53,12 @@ export function CrisisDetail() {
               Étape suivante ({WORKFLOW[WORKFLOW.indexOf(crisis.status) + 1]})
             </button>
           )}
-          <a href={`${api.defaults.baseURL}/crises/${crisisId}/exports/html`} target="_blank" rel="noreferrer"
-             className="text-sm px-3 py-2 rounded border hover:bg-gray-50">Export HTML</a>
-          <a href={`${api.defaults.baseURL}/crises/${crisisId}/exports/pdf`} target="_blank" rel="noreferrer"
-             className="text-sm px-3 py-2 rounded border hover:bg-gray-50">PDF</a>
-          <a href={`${api.defaults.baseURL}/crises/${crisisId}/exports/docx`} target="_blank" rel="noreferrer"
-             className="text-sm px-3 py-2 rounded border hover:bg-gray-50">DOCX</a>
+          <button onClick={() => downloadFile(`/crises/${crisisId}/exports/html`, `crise-${crisisId}.html`)}
+             className="text-sm px-3 py-2 rounded border hover:bg-gray-50">Export HTML</button>
+          <button onClick={() => downloadFile(`/crises/${crisisId}/exports/pdf`, `crise-${crisisId}.pdf`)}
+             className="text-sm px-3 py-2 rounded border hover:bg-gray-50">PDF</button>
+          <button onClick={() => downloadFile(`/crises/${crisisId}/exports/docx`, `crise-${crisisId}.docx`)}
+             className="text-sm px-3 py-2 rounded border hover:bg-gray-50">DOCX</button>
         </div>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
@@ -190,9 +190,12 @@ function DocumentsTab({ crisisId }: { crisisId: number }) {
       <ul className="space-y-1 text-sm">
         {docs.map((d) => (
           <li key={d.id}>
-            <a className="text-ville hover:underline" href={`${api.defaults.baseURL}/crises/${crisisId}/documents/${d.id}/download`}>
+            <button
+              className="text-ville hover:underline text-left"
+              onClick={() => downloadFile(`/crises/${crisisId}/documents/${d.id}/download`, d.original_name)}
+            >
               {d.original_name}
-            </a>
+            </button>
             <span className="text-gray-400 ml-2">{(d.size_bytes / 1024).toFixed(0)} Ko</span>
           </li>
         ))}
