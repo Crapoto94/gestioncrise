@@ -24,6 +24,7 @@ const SECTION_TITLES = {
 };
 
 const FICHE_TYPE_LABELS = {
+  cyberattaque: 'Cyberattaque',
   ransomware: 'Ransomware',
   m365: 'Microsoft 365',
   fuite_donnees: 'Fuite de données',

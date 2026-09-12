@@ -5,6 +5,7 @@ import { AttachmentsList } from '../../components/AttachmentsList';
 import type { PcgcnFiche } from '../../types';
 
 const TYPE_LABELS: Record<string, string> = {
+  cyberattaque: 'Cyberattaque',
   ransomware: 'Ransomware',
   m365: 'Microsoft 365',
   fuite_donnees: 'Fuite de données',
