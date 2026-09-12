@@ -59,8 +59,8 @@ const updateContact = (id, c, userId) => {
   return db.get(`UPDATE pgc.pcgcn_contacts SET ${sets.join(', ')}, updated_at = now() WHERE id = $${params.length} RETURNING *`, params);
 };
 const removeContact = (id) => db.run('DELETE FROM pgc.pcgcn_contacts WHERE id = $1', [id]);
-const findContactByAgentRef = (agentRef) =>
-  db.get('SELECT * FROM pgc.pcgcn_contacts WHERE source = $1 AND agent_ref = $2', ['studiorh', agentRef]);
+const findContactByAgentRef = (source, agentRef) =>
+  db.get('SELECT * FROM pgc.pcgcn_contacts WHERE source = $1 AND agent_ref = $2', [source, agentRef]);
 
 const listExternes = (category) => category
   ? db.all('SELECT * FROM pgc.pcgcn_externes WHERE category = $1 ORDER BY nom', [category])

@@ -90,7 +90,7 @@ async function syncContactsFromStudioRh(req, res, next) {
     for (const agent of list) {
       const agentRef = String(agent.id ?? agent.matricule ?? agent.email ?? '');
       if (!agentRef) continue;
-      const existing = await repo.findContactByAgentRef(agentRef);
+      const existing = await repo.findContactByAgentRef('studiorh', agentRef);
       const fields = {
         nom: agent.nom || agent.lastName || existing?.nom || '(inconnu)',
         prenom: agent.prenom || agent.firstName,
@@ -112,6 +112,57 @@ async function syncContactsFromStudioRh(req, res, next) {
     next(new HttpError(err.upstreamUnreachable ? 503 : 502,
       `STUDIO RH indisponible ou route agents à confirmer: ${err.message}`));
   }
+}
+
+/** Organigramme Ville (DGA/directeurs/responsables) en lecture directe, sans synchro. */
+async function getEncadrantsReferentiel(req, res, next) {
+  try {
+    res.json(await hubdsi.getEncadrants());
+  } catch (err) {
+    next(new HttpError(err.upstreamUnreachable ? 503 : 502, `Organigramme Hub DSI indisponible: ${err.message}`));
+  }
+}
+
+/**
+ * Synchronise les contacts depuis l'organigramme Hub DSI (DGA/directeurs/
+ * responsables de service et de secteur) : une ligne par poste pourvu
+ * (source='hubdsi', agent_ref=code de l'unité), sans écraser les champs
+ * spécifiques crise saisis localement (role_crise, notes...). Les postes
+ * vacants ne créent pas de contact (rien à joindre).
+ */
+async function syncContactsFromHubDsi(req, res, next) {
+  try {
+    const encadrants = await hubdsi.getEncadrants();
+    let created = 0; let updated = 0; let skippedVacant = 0;
+    for (const e of encadrants) {
+      if (!e.responsable) { skippedVacant += 1; continue; }
+      const agentRef = String(e.code);
+      const existing = await repo.findContactByAgentRef('hubdsi', agentRef);
+      const [nom, ...rest] = splitNomPrenom(e.responsable);
+      const fields = { nom, prenom: rest.join(' ') || undefined, fonction: e.poste, direction: e.chemin, notes: e.role };
+      if (existing) {
+        await repo.updateContact(existing.id, fields, req.user.id);
+        updated += 1;
+      } else {
+        await repo.createContact({ source: 'hubdsi', agentRef, ...fields }, req.user.id);
+        created += 1;
+      }
+    }
+    res.json({ created, updated, skippedVacant, total: encadrants.length });
+  } catch (err) {
+    next(new HttpError(err.upstreamUnreachable ? 503 : 502, `Organigramme Hub DSI indisponible: ${err.message}`));
+  }
+}
+
+/** "NOM Prénom" (convention Ville) -> ["NOM", "Prénom"...] ; à défaut, tout dans nom. */
+function splitNomPrenom(fullName) {
+  const words = fullName.trim().split(/\s+/);
+  const isNomWord = (w) => w === w.toUpperCase() && w !== w.toLowerCase();
+  const nomWords = [];
+  let i = 0;
+  while (i < words.length && isNomWord(words[i])) { nomWords.push(words[i]); i += 1; }
+  if (!nomWords.length) return [fullName];
+  return [nomWords.join(' '), ...words.slice(i)];
 }
 
 async function listExternes(req, res, next) {
@@ -197,6 +248,7 @@ module.exports = {
   listSections, updateSection,
   listFiches, getFiche, createFiche, updateFiche, removeFiche, getEcolesReferentiel,
   listContacts, createContact, updateContact, removeContact, syncContactsFromStudioRh,
+  getEncadrantsReferentiel, syncContactsFromHubDsi,
   listExternes, createExterne, updateExterne, removeExterne, getElus,
   listDocuments, uploadDocument, downloadDocument, removeDocument,
   exportHtml,

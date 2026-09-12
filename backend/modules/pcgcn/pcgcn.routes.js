@@ -31,6 +31,8 @@ router.post('/contacts', canEdit, auditLog('pcgcn_contacts'), controller.createC
 router.put('/contacts/:id', canEdit, auditLog('pcgcn_contacts'), controller.updateContact);
 router.delete('/contacts/:id', canEdit, auditLog('pcgcn_contacts'), controller.removeContact);
 router.post('/contacts/sync-studiorh', canEdit, auditLog('pcgcn_contacts'), controller.syncContactsFromStudioRh);
+router.post('/contacts/sync-hubdsi', canEdit, auditLog('pcgcn_contacts'), controller.syncContactsFromHubDsi);
+router.get('/referentiels/encadrants', controller.getEncadrantsReferentiel);
 
 router.get('/externes', controller.listExternes);
 router.post('/externes', canEdit, auditLog('pcgcn_externes'), controller.createExterne);

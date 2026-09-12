@@ -75,7 +75,20 @@ function ContactsTab({ canEdit }: { canEdit: boolean }) {
     setSyncing(true); setSyncMsg(null);
     try {
       const { data } = await api.post('/pcgcn/contacts/sync-studiorh');
-      setSyncMsg(`${data.created} créé(s), ${data.updated} mis à jour sur ${data.total} agents.`);
+      setSyncMsg(`STUDIO RH : ${data.created} créé(s), ${data.updated} mis à jour sur ${data.total} agents.`);
+      load();
+    } catch (e) {
+      setSyncMsg((e as Error).message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function syncHubDsi() {
+    setSyncing(true); setSyncMsg(null);
+    try {
+      const { data } = await api.post('/pcgcn/contacts/sync-hubdsi');
+      setSyncMsg(`Hub DSI (organigramme) : ${data.created} créé(s), ${data.updated} mis à jour, ${data.skippedVacant} poste(s) vacant(s) ignoré(s) sur ${data.total} unités.`);
       load();
     } catch (e) {
       setSyncMsg((e as Error).message);
@@ -105,6 +118,9 @@ function ContactsTab({ canEdit }: { canEdit: boolean }) {
         <div className="flex gap-2">
           <button onClick={() => setShowForm((v) => !v)} className="flex items-center gap-1 bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark">
             <Plus size={16} /> Ajouter un contact
+          </button>
+          <button onClick={syncHubDsi} disabled={syncing} className="flex items-center gap-1 border text-sm px-3 py-2 rounded hover:bg-gray-50 disabled:opacity-60">
+            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> Synchroniser encadrants (Hub DSI)
           </button>
           <button onClick={syncStudioRh} disabled={syncing} className="flex items-center gap-1 border text-sm px-3 py-2 rounded hover:bg-gray-50 disabled:opacity-60">
             <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> Synchroniser STUDIO RH
