@@ -32,6 +32,9 @@ export interface Crisis {
   ia_analysis?: string | null;
   ia_analysis_model?: string | null;
   ia_analysis_generated_at?: string | null;
+  ia_realtime_analysis?: string | null;
+  ia_realtime_analysis_model?: string | null;
+  ia_realtime_analysis_at?: string | null;
   incident_kind?: 'interruption' | 'degradation' | null;
   services_impactes?: string | null;
   notes?: string | null;
@@ -92,7 +95,7 @@ export interface CrisisDecision {
   owner_display_name?: string | null;
   owner_username?: string | null;
   horizon?: 'court_terme' | 'moyen_long_terme';
-  source?: 'manuel' | 'ia';
+  source?: 'manuel' | 'ia' | 'ia_realtime';
   acknowledged_at?: string | null;
   acknowledged_by?: number | null;
   acknowledged_by_display_name?: string | null;
@@ -100,6 +103,7 @@ export interface CrisisDecision {
   acknowledgment_comment?: string | null;
   crisis_title?: string;
   crisis_status?: CrisisStatus;
+  active?: boolean;
 }
 
 export interface CrisisDocument {

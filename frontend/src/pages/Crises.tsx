@@ -85,7 +85,13 @@ export function Crises() {
         </button>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
-      {showForm && <NewCrisisForm families={families} onSubmit={createCrisis} onCancel={() => setShowForm(false)} />}
+      {showForm && (
+        <div className="fixed inset-0 bg-black/30 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={() => setShowForm(false)}>
+          <div className="mt-8 mb-8 w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
+            <NewCrisisForm families={families} onSubmit={createCrisis} onCancel={() => setShowForm(false)} />
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 text-xs">
         {(Object.keys(STATUS_LABELS) as CrisisStatus[]).map((s) => (
@@ -187,11 +193,15 @@ function NewCrisisForm({ families, onSubmit, onCancel }: {
   return (
     <form
       onSubmit={(e) => { e.preventDefault(); onSubmit({ title, type, severity, description, teamsThreadId: teamsThread?.id || null }); }}
-      className="bg-white rounded-lg shadow-sm p-4 grid grid-cols-2 gap-4"
+      className="bg-white rounded-lg shadow-xl p-6 grid grid-cols-2 gap-4"
     >
+      <div className="col-span-2 flex items-center justify-between -mt-1 mb-1">
+        <h2 className="font-semibold text-lg">Nouvelle crise</h2>
+        <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
+      </div>
       <div className="col-span-2">
         <label className="block text-sm text-gray-600 mb-1">Titre</label>
-        <input required className="w-full border rounded px-3 py-2 text-sm" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input required autoFocus className="w-full border rounded px-3 py-2 text-sm" value={title} onChange={(e) => setTitle(e.target.value)} />
       </div>
       <div>
         <label className="block text-sm text-gray-600 mb-1">Type</label>

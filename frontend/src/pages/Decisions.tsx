@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Archive, Clock } from 'lucide-react';
+import { CheckCircle2, Archive, Clock, EyeOff } from 'lucide-react';
 import { api } from '../services/api';
 import { AcknowledgeModal } from '../components/AcknowledgeModal';
 import type { CrisisDecision } from '../types';
@@ -8,11 +8,12 @@ import type { CrisisDecision } from '../types';
 const HORIZON_LABELS: Record<string, string> = { court_terme: 'Court terme', moyen_long_terme: 'Moyen / long terme' };
 const DECISION_STATUS_LABELS: Record<string, string> = { a_faire: 'À faire', en_cours: 'En cours', fait: 'Fait', abandonnee: 'Abandonnée' };
 
-/** Décisions toutes crises confondues : "En attente" (jamais acquittées) et
- * "Archives" (acquittées, avec la date et le commentaire d'acquittement) —
+/** Décisions toutes crises confondues : "En attente" (jamais acquittées),
+ * "Archives" (acquittées, avec la date et le commentaire d'acquittement) et
+ * "Désactivées" (masquées des deux vues précédentes sans être supprimées) —
  * cf. onglet Décisions d'une fiche crise pour le CRUD scopé à une crise. */
 export function Decisions() {
-  const [tab, setTab] = useState<'attente' | 'archives'>('attente');
+  const [tab, setTab] = useState<'attente' | 'archives' | 'desactivees'>('attente');
   const [decisions, setDecisions] = useState<CrisisDecision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -20,8 +21,11 @@ export function Decisions() {
 
   function load() {
     setLoading(true);
-    api.get('/decisions', { params: { acknowledged: tab === 'archives' } })
-      .then((r) => setDecisions(r.data))
+    const params = tab === 'desactivees'
+      ? { includeInactive: true }
+      : { acknowledged: tab === 'archives' };
+    api.get('/decisions', { params })
+      .then((r) => setDecisions(tab === 'desactivees' ? r.data.filter((d: CrisisDecision) => d.active === false) : r.data))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }
@@ -32,6 +36,24 @@ export function Decisions() {
     try {
       await api.post(`/decisions/${acknowledging.id}/acknowledge`, { comment, status });
       setAcknowledging(null);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function setActive(id: number, active: boolean) {
+    try {
+      await api.post(`/decisions/${id}/active`, { active });
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function unacknowledge(id: number) {
+    try {
+      await api.post(`/decisions/${id}/unacknowledge`);
       load();
     } catch (e) {
       setError((e as Error).message);
@@ -56,6 +78,12 @@ export function Decisions() {
         >
           <Archive size={15} /> Archives (acquittées)
         </button>
+        <button
+          onClick={() => setTab('desactivees')}
+          className={`pb-2 text-sm flex items-center gap-1.5 ${tab === 'desactivees' ? 'border-b-2 border-ville text-ville font-medium' : 'text-gray-500'}`}
+        >
+          <EyeOff size={15} /> Désactivées
+        </button>
       </div>
 
       {loading ? (
@@ -73,6 +101,7 @@ export function Decisions() {
                     {(d.owner_label || d.owner_display_name) && <span>Porteur : {d.owner_label || d.owner_display_name}</span>}
                     <span className="uppercase tracking-wide text-[10px] text-gray-400">{HORIZON_LABELS[d.horizon || 'court_terme']}</span>
                     {d.source === 'ia' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">IA</span>}
+                    {d.source === 'ia_realtime' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">IA temps réel</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -85,6 +114,12 @@ export function Decisions() {
                       <CheckCircle2 size={14} /> Acquitter
                     </button>
                   )}
+                  {tab === 'archives' && (
+                    <button onClick={() => unacknowledge(d.id)} className="text-xs border px-2 py-1 rounded hover:bg-gray-50">Désacquitter</button>
+                  )}
+                  <button onClick={() => setActive(d.id, tab === 'desactivees')} className="text-xs text-gray-400 hover:text-gray-700">
+                    {tab === 'desactivees' ? 'Réactiver' : 'Désactiver'}
+                  </button>
                 </div>
               </div>
               {tab === 'archives' && d.acknowledged_at && (
@@ -98,7 +133,9 @@ export function Decisions() {
           ))}
           {decisions.length === 0 && (
             <p className="p-6 text-center text-gray-400 text-sm">
-              {tab === 'attente' ? "Aucune décision en attente d'acquittement." : 'Aucune décision archivée pour l\'instant.'}
+              {tab === 'attente' && "Aucune décision en attente d'acquittement."}
+              {tab === 'archives' && "Aucune décision archivée pour l'instant."}
+              {tab === 'desactivees' && 'Aucune décision désactivée.'}
             </p>
           )}
         </div>

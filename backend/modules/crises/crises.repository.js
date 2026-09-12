@@ -53,6 +53,21 @@ const saveIaAnalysis = (id, { analysis, model }) =>
     [analysis, model || null, id]
   );
 
+// Analyse IA temps réel (rafraîchie automatiquement toutes les 5 minutes
+// tant que la crise est ouverte, cf. services/realtimeAnalysis.js) —
+// distincte de ia_analysis (analyse rétrospective déclenchée manuellement).
+const saveRealtimeAnalysis = (id, { analysis, model }) =>
+  db.get(
+    `UPDATE pgc.crises SET ia_realtime_analysis = $1, ia_realtime_analysis_model = $2, ia_realtime_analysis_at = now()
+     WHERE id = $3 RETURNING *`,
+    [analysis, model || null, id]
+  );
+
+// Crises encore ouvertes avec un fil Teams associé — cible du cycle
+// d'analyse temps réel périodique.
+const listOpenWithTeamsThread = () =>
+  db.all(`SELECT * FROM pgc.crises WHERE status <> 'cloturee' AND teams_thread_id IS NOT NULL`);
+
 const setStatus = (id, status) => {
   // COALESCE : ne fixe closed_at à maintenant que s'il n'a pas déjà été
   // renseigné manuellement (ex. backfill d'une crise historique, ou édition
@@ -106,16 +121,23 @@ const DECISION_SELECT = `
   JOIN pgc.crises c ON c.id = d.crisis_id
 `;
 
-const listDecisions = (crisisId) =>
-  db.all(`${DECISION_SELECT} WHERE d.crisis_id = $1 ORDER BY d.created_at ASC`, [crisisId]);
+// `includeInactive` : les vues normales ne montrent que les décisions
+// actives (désactiver = masquer sans supprimer, cf. toggleDecisionActive).
+const listDecisions = (crisisId, { includeInactive = false } = {}) =>
+  db.all(
+    `${DECISION_SELECT} WHERE d.crisis_id = $1 ${includeInactive ? '' : 'AND d.active = true'} ORDER BY d.created_at ASC`,
+    [crisisId]
+  );
 
 // Vue transverse à toutes les crises — "Décisions en attente" (jamais
 // acquittées) vs "Archives" (acquittées), avec la crise associée.
-const listAllDecisions = ({ acknowledged } = {}) => {
+const listAllDecisions = ({ acknowledged, includeInactive = false, source } = {}) => {
   const clauses = [];
   const params = [];
   if (acknowledged === true) clauses.push('d.acknowledged_at IS NOT NULL');
   if (acknowledged === false) clauses.push('d.acknowledged_at IS NULL');
+  if (!includeInactive) clauses.push('d.active = true');
+  if (source) { params.push(source); clauses.push(`d.source = $${params.length}`); }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const order = acknowledged ? 'd.acknowledged_at DESC' : 'd.created_at DESC';
   return db.all(`${DECISION_SELECT} ${where} ORDER BY ${order}`, params);
@@ -126,10 +148,19 @@ const findDecisionById = (id) => db.get(`${DECISION_SELECT} WHERE d.id = $1`, [i
 const removeDecisionsBySource = (crisisId, source) =>
   db.run('DELETE FROM pgc.crisis_decisions WHERE crisis_id = $1 AND source = $2', [crisisId, source]);
 
-const updateDecision = (id, { status, title, description, ownerId, ownerLabel, horizon, dueAt }) => {
+// Ne retire que les propositions PAS ENCORE acquittées d'une source donnée —
+// utilisé par le cycle d'analyse temps réel pour renouveler ses propositions
+// à chaque passage sans perdre celles déjà traitées par la cellule de crise.
+const removeUnacknowledgedDecisionsBySource = (crisisId, source) =>
+  db.run(
+    'DELETE FROM pgc.crisis_decisions WHERE crisis_id = $1 AND source = $2 AND acknowledged_at IS NULL',
+    [crisisId, source]
+  );
+
+const updateDecision = (id, { status, title, description, ownerId, ownerLabel, horizon, dueAt, active }) => {
   const sets = [];
   const params = [];
-  const map = { status, title, description, owner_id: ownerId, owner_label: ownerLabel, horizon, due_at: dueAt };
+  const map = { status, title, description, owner_id: ownerId, owner_label: ownerLabel, horizon, due_at: dueAt, active };
   for (const [col, val] of Object.entries(map)) {
     if (val !== undefined) { params.push(val); sets.push(`${col} = $${params.length}`); }
   }
@@ -157,6 +188,17 @@ const acknowledgeDecision = (id, { comment, status, userId }) => {
   );
 };
 
+// Annule l'acquittement (remet la décision en attente) — distinct de
+// "désactiver" : ici la décision reste pleinement active/visible, seule sa
+// preuve d'acquittement (qui/quand/commentaire) est effacée.
+const unacknowledgeDecision = (id) =>
+  db.get(
+    `UPDATE pgc.crisis_decisions SET acknowledged_at = NULL, acknowledged_by = NULL,
+       acknowledgment_comment = NULL, updated_at = now()
+     WHERE id = $1 RETURNING *`,
+    [id]
+  );
+
 // --- Membres cellule -------------------------------------------------------
 const addMember = (crisisId, userId, cellRole) =>
   db.run(
@@ -179,6 +221,8 @@ module.exports = {
   WORKFLOW_ORDER, list, findById, create, update, setStatus,
   addEvent, listEvents, removeEventsBySource,
   addDecision, listDecisions, listAllDecisions, findDecisionById,
-  removeDecisionsBySource, updateDecision, acknowledgeDecision,
-  addMember, listMembers, removeMember, saveTeamsImport, saveIaAnalysis,
+  removeDecisionsBySource, removeUnacknowledgedDecisionsBySource,
+  updateDecision, acknowledgeDecision, unacknowledgeDecision,
+  addMember, listMembers, removeMember,
+  saveTeamsImport, saveIaAnalysis, saveRealtimeAnalysis, listOpenWithTeamsThread,
 };

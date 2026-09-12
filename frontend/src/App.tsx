@@ -7,6 +7,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Crises } from './pages/Crises';
 import { CrisisDetail } from './pages/CrisisDetail';
 import { Decisions } from './pages/Decisions';
+import { CrisesEnCours } from './pages/CrisesEnCours';
 import { Documentation } from './pages/Documentation';
 import { Pca } from './pages/Pca';
 import { Pra } from './pages/Pra';
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="crises" element={<Crises />} />
         <Route path="crises/:id" element={<CrisisDetail />} />
         <Route path="decisions" element={<Decisions />} />
+        <Route path="crises-en-cours" element={<CrisesEnCours />} />
         <Route path="documentation" element={<Documentation />} />
         <Route path="pcgcn" element={<Pcgcn />} />
         <Route path="pca" element={<Pca />} />

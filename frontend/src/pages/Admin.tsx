@@ -32,27 +32,8 @@ export function Admin() {
   function loadUsers() { api.get('/users').then((r) => setUsers(r.data)); }
   useEffect(() => { loadStatus(); loadUsers(); }, []);
 
-  const [prompt, setPrompt] = useState('');
   const [models, setModels] = useState<string[]>([]);
-  const [savingPrompt, setSavingPrompt] = useState(false);
-  const [promptMsg, setPromptMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.get('/admin/settings/crisis_ia_prompt').then((r) => setPrompt(r.data.value || ''));
-    api.get('/admin/ia-models').then((r) => setModels(r.data)).catch(() => {});
-  }, []);
-
-  async function savePrompt() {
-    setSavingPrompt(true); setPromptMsg(null);
-    try {
-      await api.put('/admin/settings/crisis_ia_prompt', { value: prompt });
-      setPromptMsg('Enregistré.');
-    } catch (e) {
-      setPromptMsg((e as Error).message);
-    } finally {
-      setSavingPrompt(false);
-    }
-  }
+  useEffect(() => { api.get('/admin/ia-models').then((r) => setModels(r.data)).catch(() => {}); }, []);
 
   async function toggleRole(userId: number, role: string, roles: string[]) {
     const next = roles.includes(role) ? roles.filter((r) => r !== role) : [...roles, role];
@@ -83,25 +64,20 @@ export function Admin() {
         )}
       </section>
 
-      <section className="bg-white rounded-lg shadow-sm p-4">
-        <h2 className="font-medium mb-3">Analyse IA des crises — prompt</h2>
-        <p className="text-xs text-gray-500 mb-2">
-          Placeholders disponibles : <code>{'{TITRE}'}</code>, <code>{'{TYPE}'}</code>, <code>{'{SEVERITE}'}</code>, <code>{'{TRANSCRIPTION}'}</code>.
-          {models.length > 0 && <> Modèles IA Locale disponibles : {models.join(', ')}.</>}
-        </p>
-        <textarea
-          className="w-full border rounded px-3 py-2 text-sm font-mono"
-          rows={14}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        <div className="flex items-center gap-2 mt-2">
-          <button onClick={savePrompt} disabled={savingPrompt} className="bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark disabled:opacity-60">
-            {savingPrompt ? 'Enregistrement…' : 'Enregistrer le prompt'}
-          </button>
-          {promptMsg && <span className="text-xs text-gray-500">{promptMsg}</span>}
-        </div>
-      </section>
+      <PromptEditor
+        settingKey="crisis_ia_prompt"
+        title="Analyse IA rétrospective des crises — prompt"
+        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{TRANSCRIPTION}']}
+        models={models}
+      />
+
+      <PromptEditor
+        settingKey="crisis_ia_realtime_prompt"
+        title="Analyse IA temps réel des crises ouvertes — prompt"
+        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{TRANSCRIPTION}']}
+        models={models}
+        hint="Ré-exécuté automatiquement toutes les 5 minutes tant qu'une crise reste ouverte avec un fil Teams associé."
+      />
 
       <section className="bg-white rounded-lg shadow-sm p-4">
         <h2 className="font-medium mb-3">Utilisateurs & rôles</h2>
@@ -132,5 +108,56 @@ export function Admin() {
         </div>
       </section>
     </div>
+  );
+}
+
+function PromptEditor({ settingKey, title, placeholders, models, hint }: {
+  settingKey: string;
+  title: string;
+  placeholders: string[];
+  models: string[];
+  hint?: string;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get(`/admin/settings/${settingKey}`).then((r) => setPrompt(r.data.value || ''));
+  }, [settingKey]);
+
+  async function save() {
+    setSaving(true); setMsg(null);
+    try {
+      await api.put(`/admin/settings/${settingKey}`, { value: prompt });
+      setMsg('Enregistré.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-lg shadow-sm p-4">
+      <h2 className="font-medium mb-3">{title}</h2>
+      <p className="text-xs text-gray-500 mb-2">
+        Placeholders disponibles : {placeholders.map((p) => <code key={p} className="mr-1">{p}</code>)}
+        {models.length > 0 && <> Modèles IA Locale disponibles : {models.join(', ')}.</>}
+      </p>
+      {hint && <p className="text-xs text-gray-400 mb-2">{hint}</p>}
+      <textarea
+        className="w-full border rounded px-3 py-2 text-sm font-mono"
+        rows={14}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+      <div className="flex items-center gap-2 mt-2">
+        <button onClick={save} disabled={saving} className="bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark disabled:opacity-60">
+          {saving ? 'Enregistrement…' : 'Enregistrer le prompt'}
+        </button>
+        {msg && <span className="text-xs text-gray-500">{msg}</span>}
+      </div>
+    </section>
   );
 }

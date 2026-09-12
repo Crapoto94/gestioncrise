@@ -97,6 +97,7 @@ async function start() {
     console.log(`[PGC backend] à l'écoute sur le port ${PORT} (env: ${process.env.NODE_ENV || 'development'})`);
     console.log(`[PGC backend] documentation Swagger: http://localhost:${PORT}/api-docs`);
   });
+  require('./services/realtimeAnalysis').start();
 }
 
 start().catch((err) => {

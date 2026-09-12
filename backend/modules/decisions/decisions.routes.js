@@ -17,5 +17,7 @@ router.use(requireAuth);
  */
 router.get('/', controller.list);
 router.post('/:id/acknowledge', auditLog('crisis_decisions'), controller.acknowledge);
+router.post('/:id/unacknowledge', auditLog('crisis_decisions'), controller.unacknowledge);
+router.post('/:id/active', auditLog('crisis_decisions'), controller.setActive);
 
 module.exports = router;

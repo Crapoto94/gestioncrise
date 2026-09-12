@@ -6,9 +6,10 @@ import { SeverityBadge } from '../components/StatusBadge';
 import { Timeline } from '../components/Timeline';
 import { WorkflowStepper } from '../components/WorkflowStepper';
 import { AcknowledgeModal } from '../components/AcknowledgeModal';
+import { Spinner } from '../components/Spinner';
 import { markdownToHtml } from '../utils/markdown';
-import { TYPE_LABELS } from '../constants/crisisTypes';
-import type { Crisis, CrisisType, Severity, CrisisEvent, CrisisDecision, CrisisDocument, CrisisCommunication, CrisisMailbox, TeamsThreadResult } from '../types';
+import { TYPE_LABELS, STATUS_LABELS } from '../constants/crisisTypes';
+import type { Crisis, CrisisType, CrisisStatus, Severity, CrisisEvent, CrisisDecision, CrisisDocument, CrisisCommunication, CrisisMailbox, TeamsThreadResult } from '../types';
 
 /** Convertit un ISO datetime en valeur acceptée par <input type="datetime-local">. */
 function toLocalInput(iso: string | null | undefined) {
@@ -40,19 +41,21 @@ export function CrisisDetail() {
   const [tab, setTab] = useState<Tab>('Synthèse');
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
 
   function loadCrisis() {
     api.get(`/crises/${crisisId}`).then((r) => setCrisis(r.data)).catch((e) => setError(e.message));
   }
   useEffect(loadCrisis, [crisisId]);
 
-  async function advance() {
+  async function advance(reason: string) {
     if (!crisis) return;
     const idx = WORKFLOW.indexOf(crisis.status);
     const next = WORKFLOW[idx + 1];
     if (!next) return;
     try {
-      await api.post(`/crises/${crisisId}/transition`, { status: next });
+      await api.post(`/crises/${crisisId}/transition`, { status: next, reason });
+      setTransitioning(false);
       loadCrisis();
     } catch (e) {
       setError((e as Error).message);
@@ -81,7 +84,7 @@ export function CrisisDetail() {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-semibold">{crisis.title}</h1>
+              <h1 className="text-lg font-bold">{crisis.title}</h1>
               <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-ville" title="Modifier les informations de la crise">
                 <Pencil size={16} />
               </button>
@@ -93,8 +96,8 @@ export function CrisisDetail() {
           </div>
           <div className="flex gap-2">
             {crisis.status !== 'cloturee' && (
-              <button onClick={advance} className="bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark">
-                Étape suivante ({WORKFLOW[WORKFLOW.indexOf(crisis.status) + 1]})
+              <button onClick={() => setTransitioning(true)} className="bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark">
+                Étape suivante ({STATUS_LABELS[WORKFLOW[WORKFLOW.indexOf(crisis.status) + 1] as CrisisStatus]})
               </button>
             )}
             <button onClick={() => downloadFile(`/crises/${crisisId}/exports/html`, `crise-${crisisId}.html`)}
@@ -112,6 +115,15 @@ export function CrisisDetail() {
         <div className="bg-white rounded-lg shadow-sm px-6 py-4">
           <WorkflowStepper status={crisis.status} />
         </div>
+      )}
+
+      {transitioning && (
+        <TransitionModal
+          fromLabel={STATUS_LABELS[crisis.status]}
+          toLabel={STATUS_LABELS[WORKFLOW[WORKFLOW.indexOf(crisis.status) + 1] as CrisisStatus]}
+          onCancel={() => setTransitioning(false)}
+          onConfirm={advance}
+        />
       )}
 
       <div className="border-b flex gap-4">
@@ -133,6 +145,47 @@ export function CrisisDetail() {
       {tab === 'Communications' && <CommunicationsTab crisisId={crisisId} />}
       {tab === 'Teams & IA' && <TeamsIaTab crisisId={crisisId} crisis={crisis} onUpdated={loadCrisis} />}
       {tab === MAILBOXES_TAB && <MailboxesTab crisisId={crisisId} />}
+    </div>
+  );
+}
+
+/** Un motif est toujours exigé pour changer le statut d'une crise — il est
+ * enregistré dans la main courante pour garder une trace de pourquoi/quand
+ * la crise a avancé (ou reculé) dans son cycle de vie. */
+function TransitionModal({ fromLabel, toLabel, onCancel, onConfirm }: {
+  fromLabel: string;
+  toLabel: string;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-5 space-y-3">
+        <h2 className="font-medium">Changer le statut de la crise</h2>
+        <p className="text-sm text-gray-600">{fromLabel} → <span className="font-medium text-ville">{toLabel}</span></p>
+        <div>
+          <label className="block text-sm text-gray-600 mb-1">Motif (obligatoire)</label>
+          <textarea
+            className="w-full border rounded px-3 py-2 text-sm"
+            rows={3}
+            placeholder="Pourquoi ce changement d'étape maintenant ?"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onCancel} className="px-3 py-2 text-sm rounded border">Annuler</button>
+          <button
+            onClick={() => reason.trim() && onConfirm(reason.trim())}
+            disabled={!reason.trim()}
+            className="px-3 py-2 text-sm rounded bg-ville text-white hover:bg-ville-dark disabled:opacity-50"
+          >
+            Confirmer
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -308,8 +361,9 @@ function DecisionsTab({ crisisId }: { crisisId: number }) {
   const [ownerLabel, setOwnerLabel] = useState('');
   const [horizon, setHorizon] = useState<'court_terme' | 'moyen_long_terme'>('court_terme');
   const [acknowledging, setAcknowledging] = useState<CrisisDecision | null>(null);
+  const [showInactive, setShowInactive] = useState(false);
 
-  function load() { api.get(`/crises/${crisisId}/decisions`).then((r) => setDecisions(r.data)); }
+  function load() { api.get(`/crises/${crisisId}/decisions`, { params: { includeInactive: true } }).then((r) => setDecisions(r.data)); }
   useEffect(load, [crisisId]);
 
   async function submit(e: React.FormEvent) {
@@ -325,12 +379,24 @@ function DecisionsTab({ crisisId }: { crisisId: number }) {
     load();
   }
 
+  async function setActive(decisionId: number, active: boolean) {
+    await api.post(`/decisions/${decisionId}/active`, { active });
+    load();
+  }
+
   async function acknowledge(comment: string, status: string) {
     if (!acknowledging) return;
     await api.post(`/decisions/${acknowledging.id}/acknowledge`, { comment, status });
     setAcknowledging(null);
     load();
   }
+
+  async function unacknowledge(decisionId: number) {
+    await api.post(`/decisions/${decisionId}/unacknowledge`);
+    load();
+  }
+
+  const visible = decisions.filter((d) => showInactive || d.active !== false);
 
   return (
     <div className="bg-white rounded-lg shadow-sm p-4 space-y-4">
@@ -344,26 +410,38 @@ function DecisionsTab({ crisisId }: { crisisId: number }) {
         </select>
         <button className="bg-ville text-white text-sm px-3 py-2 rounded">Ajouter</button>
       </form>
+      <label className="flex items-center gap-1.5 text-xs text-gray-500">
+        <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+        Afficher les décisions désactivées
+      </label>
       <ul className="space-y-2">
-        {decisions.map((d) => (
-          <li key={d.id} className="border rounded p-2 text-sm space-y-1.5">
+        {visible.map((d) => (
+          <li key={d.id} className={`border rounded p-2 text-sm space-y-1.5 ${d.active === false ? 'opacity-50' : ''}`}>
             <div className="flex items-center justify-between gap-2">
               <div>
                 <span>{d.title}</span>
                 {(d.owner_label || d.owner_display_name) && <span className="text-gray-400"> — {d.owner_label || d.owner_display_name}</span>}
                 <span className="text-[10px] uppercase tracking-wide text-gray-400 ml-2">{HORIZON_LABELS[d.horizon || 'court_terme']}</span>
                 {d.source === 'ia' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">IA</span>}
+                {d.source === 'ia_realtime' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">IA temps réel</span>}
                 {d.created_at && <span className="text-[10px] text-gray-400 ml-2">prise le {new Date(d.created_at).toLocaleDateString('fr-FR')}</span>}
+                {d.active === false && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">Désactivée</span>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <select value={d.status} onChange={(e) => setStatus(d.id, e.target.value)} className="border rounded px-2 py-1 text-xs">
                   {['a_faire', 'en_cours', 'fait', 'abandonnee'].map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
                 {d.acknowledged_at ? (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">Acquittée</span>
+                  <>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">Acquittée</span>
+                    <button onClick={() => unacknowledge(d.id)} className="text-xs border px-2 py-1 rounded hover:bg-gray-50">Désacquitter</button>
+                  </>
                 ) : (
                   <button onClick={() => setAcknowledging(d)} className="text-xs border px-2 py-1 rounded hover:bg-gray-50">Acquitter</button>
                 )}
+                <button onClick={() => setActive(d.id, d.active === false)} className="text-xs text-gray-400 hover:text-gray-700">
+                  {d.active === false ? 'Réactiver' : 'Désactiver'}
+                </button>
               </div>
             </div>
             {d.acknowledged_at && (
@@ -375,7 +453,7 @@ function DecisionsTab({ crisisId }: { crisisId: number }) {
             )}
           </li>
         ))}
-        {decisions.length === 0 && <p className="text-sm text-gray-400">Aucune décision.</p>}
+        {visible.length === 0 && <p className="text-sm text-gray-400">Aucune décision.</p>}
       </ul>
       {acknowledging && (
         <AcknowledgeModal decision={acknowledging} onCancel={() => setAcknowledging(null)} onConfirm={acknowledge} />
@@ -650,6 +728,12 @@ function TeamsIaTab({ crisisId, crisis, onUpdated }: { crisisId: number; crisis:
   const [analyzing, setAnalyzing] = useState(false);
   const [progress, setProgress] = useState<{ status: string; progress: number; eventsAdded?: number; decisionsAdded?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [model, setModel] = useState('');
+
+  useEffect(() => {
+    api.get('/crises/ia-models').then((r) => setModels(r.data)).catch(() => {});
+  }, []);
 
   async function search() {
     setSearching(true); setError(null);
@@ -681,7 +765,7 @@ function TeamsIaTab({ crisisId, crisis, onUpdated }: { crisisId: number; crisis:
   async function analyze() {
     setAnalyzing(true); setError(null); setProgress(null);
     try {
-      const { data: job } = await api.post(`/crises/${crisisId}/analyze`);
+      const { data: job } = await api.post(`/crises/${crisisId}/analyze`, model ? { model } : {});
       // Poll jusqu'à complétion — une génération IA peut prendre 1-2 minutes.
       for (;;) {
         await new Promise((r) => setTimeout(r, 2500));
@@ -753,14 +837,25 @@ function TeamsIaTab({ crisisId, crisis, onUpdated }: { crisisId: number; crisis:
       </div>
 
       <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <h3 className="font-medium text-sm">Analyse IA</h3>
-          <button onClick={analyze} disabled={analyzing} className="bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark disabled:opacity-60">
-            {analyzing ? 'Analyse en cours…' : crisis.ia_analysis ? 'Relancer l\'analyse' : 'Analyser avec l\'IA'}
-          </button>
+          <div className="flex items-center gap-2">
+            {models.length > 0 && (
+              <select value={model} onChange={(e) => setModel(e.target.value)} disabled={analyzing} className="border rounded px-2 py-2 text-sm">
+                <option value="">Modèle par défaut</option>
+                {models.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            )}
+            <button onClick={analyze} disabled={analyzing} className="bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark disabled:opacity-60 flex items-center gap-2">
+              {analyzing && <Spinner />}
+              {analyzing ? 'Analyse en cours…' : crisis.ia_analysis ? 'Relancer l\'analyse' : 'Analyser avec l\'IA'}
+            </button>
+          </div>
         </div>
-        {progress && analyzing && (
-          <div className="text-xs text-gray-500">{progress.status} ({progress.progress}%)</div>
+        {analyzing && (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Spinner /> {progress ? `${progress.status} (${progress.progress}%)` : 'Démarrage…'}
+          </div>
         )}
         {progress && !analyzing && progress.status === 'completed' && (
           <div className="text-xs text-green-700">

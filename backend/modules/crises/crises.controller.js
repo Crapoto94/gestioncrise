@@ -6,6 +6,7 @@ const ia = require('../../services/ia');
 const analyseMail = require('../../services/analyseMail');
 const settingsRepo = require('../admin/settings.repository');
 const { HttpError } = require('../../middlewares/errorHandler');
+const { parseAnalysisResponse, VALID_HORIZONS } = require('../../utils/iaAnalysisResponse');
 
 // Filet de secours si `pgc.app_settings.crisis_ia_prompt` est absent (ne
 // devrait pas arriver en pratique, seedé par les migrations 006/007) — on
@@ -21,33 +22,6 @@ DISCUSSION TEAMS :
 
 Produis une synthèse structurée en Markdown (résumé, cause racine, ce qui a bien fonctionné, axes d'amélioration, niveau de gravité estimé), puis un unique bloc \`\`\`json avec les clés "chronologie" (tableau de {date, contenu}) et "actions" (tableau de {quoi, qui, terme: "court_terme"|"moyen_long_terme"}).`;
 
-const VALID_HORIZONS = ['court_terme', 'moyen_long_terme'];
-
-/**
- * Extrait le bloc ```json ... ``` de la réponse IA (s'il existe) et le
- * parse. Retourne { synthese, chronologie, actions } — synthese est le texte
- * markdown avant le bloc JSON (ou la réponse complète si aucun bloc trouvé /
- * JSON invalide, pour ne jamais perdre l'analyse).
- */
-function parseAnalysisResponse(raw) {
-  const match = raw.match(/```json\s*([\s\S]*?)```/i);
-  if (!match) return { synthese: raw.trim(), chronologie: [], actions: [] };
-  // Le modèle fait précéder le bloc JSON d'un titre ("### PARTIE 2 — Bloc
-  // JSON structuré" ou variante) qui ne doit pas polluer la synthèse.
-  let synthese = raw.slice(0, match.index).trim();
-  synthese = synthese.replace(/\n{0,2}#{1,6}[^\n]*partie\s*2[^\n]*$/i, '').trim();
-  synthese = synthese.replace(/\n{0,2}(\*{3}|-{3})\s*$/, '').trim();
-  synthese = synthese || raw.trim();
-  try {
-    const parsed = JSON.parse(match[1]);
-    const chronologie = Array.isArray(parsed.chronologie) ? parsed.chronologie : [];
-    const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
-    return { synthese, chronologie, actions };
-  } catch {
-    return { synthese, chronologie: [], actions: [] };
-  }
-}
-
 // Jobs d'analyse IA asynchrones (même principe que appdsi/transcriptmanager :
 // réponse HTTP immédiate avec un jobId, traitement en arrière-plan, le front
 // poll GET /:id/analyze/status/:jobId — une génération IA peut prendre
@@ -60,9 +34,22 @@ async function list(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/** Crises ouvertes suivies en temps réel (fil Teams associé, statut non
+ * clôturé) — alimente le menu "Crises en cours". */
+async function listLive(req, res, next) {
+  try { res.json(await repo.listOpenWithTeamsThread()); } catch (err) { next(err); }
+}
+
 /** Taxonomie des types de crise groupés par famille (sécurité/technique/transverse). */
 function listFamilies(req, res) {
   res.json(service.CRISIS_FAMILIES);
+}
+
+/** Modèles IA Locale disponibles pour l'analyse d'une crise (pas de gating
+ * par rôle : la route /admin/ia-models est réservée DSI/RSSI, mais analyser
+ * une crise ne l'est pas — le sélecteur de modèle doit rester cohérent). */
+async function listIaModels(req, res, next) {
+  try { res.json(await ia.listModels()); } catch (err) { next(err.upstreamUnreachable ? new HttpError(503, `IA Locale indisponible: ${err.message}`) : err); }
 }
 
 async function getOne(req, res, next) {
@@ -88,7 +75,7 @@ async function update(req, res, next) {
 
 async function transition(req, res, next) {
   try {
-    res.json(await service.transitionStatus(Number(req.params.id), req.body.status, req.user.id));
+    res.json(await service.transitionStatus(Number(req.params.id), req.body.status, req.user.id, req.body.reason));
   } catch (err) { next(err); }
 }
 
@@ -211,9 +198,10 @@ async function startAnalysis(req, res, next) {
         for (const item of chronologie) {
           if (!item?.contenu) continue;
           const validDate = item.date && !Number.isNaN(Date.parse(item.date)) ? item.date : null;
-          const datePrefix = item.date ? `[${item.date}] ` : '';
+          // Pas de préfixe date en dur dans le texte : `createdAt` porte déjà
+          // la date réelle de l'événement, affichée par la frise (Timeline).
           await repo.addEvent(crisis.id, {
-            content: `${datePrefix}${item.contenu}`,
+            content: item.contenu,
             eventType: 'analyse_ia',
             source: 'ia',
             createdAt: validDate,
@@ -303,7 +291,7 @@ async function removeMailbox(req, res, next) {
 }
 
 module.exports = {
-  list, getOne, create, update, transition, listFamilies,
+  list, listLive, getOne, create, update, transition, listFamilies, listIaModels,
   listEvents, addEvent, listDecisions, addDecision, updateDecision,
   listMembers, addMember, removeMember,
   searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus,

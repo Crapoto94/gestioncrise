@@ -68,12 +68,18 @@ async function createCrisis(data, actorId) {
   return crisis;
 }
 
-async function transitionStatus(crisisId, nextStatus, actorId) {
+const STATUS_LABELS = {
+  detection: 'Détection', qualification: 'Qualification', cellule: 'Cellule de crise',
+  resolution: 'Résolution', retex: 'RETEX', cloturee: 'Clôturée',
+};
+
+async function transitionStatus(crisisId, nextStatus, actorId, reason) {
   const crisis = await repo.findById(crisisId);
   if (!crisis) throw new HttpError(404, 'Crise introuvable');
 
   const order = repo.WORKFLOW_ORDER;
   if (!order.includes(nextStatus)) throw new HttpError(400, `Statut invalide: ${nextStatus}`);
+  if (!reason || !reason.trim()) throw new HttpError(400, 'Un motif est requis pour changer le statut de la crise.');
 
   const currentIdx = order.indexOf(crisis.status);
   const nextIdx = order.indexOf(nextStatus);
@@ -84,8 +90,10 @@ async function transitionStatus(crisisId, nextStatus, actorId) {
   }
 
   const updated = await repo.setStatus(crisisId, nextStatus);
+  const fromLabel = STATUS_LABELS[crisis.status] || crisis.status;
+  const toLabel = STATUS_LABELS[nextStatus] || nextStatus;
   await repo.addEvent(crisisId, {
-    content: `Statut changé: ${crisis.status} -> ${nextStatus}`,
+    content: `Statut changé : ${fromLabel} → ${toLabel}. Motif : ${reason.trim()}`,
     eventType: 'changement_statut',
     createdBy: actorId,
   });

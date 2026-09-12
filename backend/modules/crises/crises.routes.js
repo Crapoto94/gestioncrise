@@ -19,6 +19,8 @@ router.use(requireAuth);
 router.get('/', controller.list);
 router.post('/', auditLog('crises'), controller.create);
 router.get('/families', controller.listFamilies);
+router.get('/ia-models', controller.listIaModels);
+router.get('/live', controller.listLive);
 router.get('/teams/search', controller.searchTeamsThreads);
 router.get('/:id', controller.getOne);
 router.put('/:id', auditLog('crises'), controller.update);
