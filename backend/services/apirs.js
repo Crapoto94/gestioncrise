@@ -1,16 +1,12 @@
 // APIRS — référentiel d'infrastructure (cf. 01_ARCHITECTURE_TECHNIQUE.md et
 // 02_REFERENTIELS_ET_APIS.md). Utilisé pour croiser l'état des infrastructures
 // avec les crises de type panne_reseau/panne_applicative et les fiches PCA/PRA.
-const axios = require('axios');
+const { createServiceClient, isReachable } = require('./httpClient');
 
 const APIRS_URL = process.env.APIRS_API_URL;
 const APIRS_KEY = process.env.APIRS_API_KEY;
 
-const client = axios.create({
-  baseURL: APIRS_URL,
-  timeout: 10_000,
-  headers: { 'X-API-KEY': APIRS_KEY },
-});
+const client = createServiceClient({ baseURL: APIRS_URL, headers: { 'X-API-KEY': APIRS_KEY } });
 
 function unwrap(promise, label) {
   return promise.then((r) => r.data).catch((err) => {
@@ -33,7 +29,7 @@ async function ping() {
     await client.get('/api/status', { timeout: 3000 });
     return { ok: true };
   } catch (err) {
-    return { ok: false, detail: err.message };
+    return isReachable(err) ? { ok: true, detail: `répond mais: ${err.message}` } : { ok: false, detail: err.message };
   }
 }
 

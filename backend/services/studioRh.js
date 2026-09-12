@@ -2,16 +2,12 @@
 // Distinct de Hub DSI dans les specs internes de la Ville : à confirmer auprès
 // de l'équipe DSI si à terme les deux référentiels fusionnent. Même pattern
 // que les autres services externes : URL/clé 100% configurables, jamais en dur.
-const axios = require('axios');
+const { createServiceClient, isReachable } = require('./httpClient');
 
 const STUDIORH_URL = process.env.STUDIORH_API_URL;
 const STUDIORH_KEY = process.env.STUDIORH_API_KEY;
 
-const client = axios.create({
-  baseURL: STUDIORH_URL,
-  timeout: 10_000,
-  headers: { 'X-API-KEY': STUDIORH_KEY },
-});
+const client = createServiceClient({ baseURL: STUDIORH_URL, headers: { 'X-API-KEY': STUDIORH_KEY } });
 
 function unwrap(promise, label) {
   return promise.then((r) => r.data).catch((err) => {
@@ -34,7 +30,7 @@ async function ping() {
     await client.get('/api/status', { timeout: 3000 });
     return { ok: true };
   } catch (err) {
-    return { ok: false, detail: err.message };
+    return isReachable(err) ? { ok: true, detail: `répond mais: ${err.message}` } : { ok: false, detail: err.message };
   }
 }
 

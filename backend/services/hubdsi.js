@@ -3,16 +3,15 @@
 // (tâches, projets, tickets GLPI, réunions...). Jeton distinct de l'APM :
 // clé `dsk_...` à scope (cf. GUIDE §4). Ces référentiels sont en LECTURE
 // SEULE — Hub DSI reste maître des données, on ne les recrée pas ici.
-const axios = require('axios');
+const { createServiceClient, isReachable } = require('./httpClient');
 
 const HUB_URL = process.env.HUBDSI_API_URL; // provisoire (IP) en attendant https://dsihub.ivry.local
 const HUB_KEY = process.env.HUBDSI_API_KEY; // clé dsk_...
 
-const client = axios.create({
-  baseURL: HUB_URL,
-  timeout: 10_000,
-  headers: { 'X-API-Key': HUB_KEY },
-});
+// `proxy: false` : IP interne provisoire, pas un nom *.ivry.local — un proxy
+// sortant d'entreprise (HTTP_PROXY) ne sait généralement pas la router et le
+// fait échouer en timeout ; on force donc l'accès direct.
+const client = createServiceClient({ baseURL: HUB_URL, headers: { 'X-API-Key': HUB_KEY }, proxy: false });
 
 function unwrap(promise, label) {
   return promise.then((r) => r.data).catch((err) => {
@@ -44,7 +43,7 @@ async function ping() {
     await client.get('/api/ville/config', { timeout: 3000 });
     return { ok: true };
   } catch (err) {
-    return { ok: false, detail: err.message };
+    return isReachable(err) ? { ok: true, detail: `répond mais: ${err.message}` } : { ok: false, detail: err.message };
   }
 }
 

@@ -3,16 +3,12 @@
 // Cf. GUIDE_NOUVELLE_APP_VILLE.md §3. Toutes les routes sont préfixées /api/v1/.
 // Auth: header X-API-KEY (jamais de JWT ici — le JWT APM sert seulement à
 // l'admin de l'APM lui-même, pas à notre application).
-const axios = require('axios');
+const { createServiceClient, isReachable } = require('./httpClient');
 
 const APM_URL = process.env.APM_API_URL || 'https://api.ivry.local';
 const APM_KEY = process.env.APM_API_KEY;
 
-const client = axios.create({
-  baseURL: APM_URL,
-  timeout: 10_000,
-  headers: { 'X-API-KEY': APM_KEY },
-});
+const client = createServiceClient({ baseURL: APM_URL, headers: { 'X-API-KEY': APM_KEY } });
 
 function unwrap(promise) {
   return promise.then((r) => r.data).catch((err) => {
@@ -83,7 +79,7 @@ async function ping() {
     await client.get('/api/status', { timeout: 3000 });
     return { ok: true };
   } catch (err) {
-    return { ok: false, detail: err.message };
+    return isReachable(err) ? { ok: true, detail: `répond mais: ${err.message}` } : { ok: false, detail: err.message };
   }
 }
 

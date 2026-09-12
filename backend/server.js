@@ -1,4 +1,13 @@
-require('dotenv').config();
+// Charge backend/.env s'il existe (override local explicite), sinon retombe
+// sur le .env à la racine du dépôt — c'est celui-là que docker-compose utilise
+// aussi (env_file: .env), pour éviter d'avoir deux .env qui divergent quand on
+// lance le backend directement (`node server.js`, hors Docker).
+const path = require('path');
+const fs = require('fs');
+const localEnvPath = path.join(__dirname, '.env');
+const rootEnvPath = path.join(__dirname, '..', '.env');
+require('dotenv').config({ path: fs.existsSync(localEnvPath) ? localEnvPath : rootEnvPath });
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');

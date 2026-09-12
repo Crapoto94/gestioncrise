@@ -1,16 +1,12 @@
 // Analyse Mail — alertes et indicateurs de compromission (IOC), utile pour
 // qualifier automatiquement les crises de type phishing/compromission_mail
 // (cf. 02_REFERENTIELS_ET_APIS.md et 04_GESTION_DES_CRISES.md).
-const axios = require('axios');
+const { createServiceClient, isReachable } = require('./httpClient');
 
 const ANALYSEMAIL_URL = process.env.ANALYSEMAIL_API_URL;
 const ANALYSEMAIL_KEY = process.env.ANALYSEMAIL_API_KEY;
 
-const client = axios.create({
-  baseURL: ANALYSEMAIL_URL,
-  timeout: 10_000,
-  headers: { 'X-API-KEY': ANALYSEMAIL_KEY },
-});
+const client = createServiceClient({ baseURL: ANALYSEMAIL_URL, headers: { 'X-API-KEY': ANALYSEMAIL_KEY } });
 
 function unwrap(promise, label) {
   return promise.then((r) => r.data).catch((err) => {
@@ -33,7 +29,7 @@ async function ping() {
     await client.get('/api/status', { timeout: 3000 });
     return { ok: true };
   } catch (err) {
-    return { ok: false, detail: err.message };
+    return isReachable(err) ? { ok: true, detail: `répond mais: ${err.message}` } : { ok: false, detail: err.message };
   }
 }
 

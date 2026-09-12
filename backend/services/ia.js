@@ -1,16 +1,17 @@
-// IA Locale — service d'IA interrogeable via une API dédiée de la Ville
-// (distincte d'APM et de Hub DSI, cf. 01_ARCHITECTURE_TECHNIQUE.md). Utilisée
-// pour le chat de crise, la synthèse, l'aide à la rédaction RETEX et l'aide à
-// la décision (cf. 06_IA_AUTOMATISATION.md).
+// IA Locale — en pratique hébergée sur la même API que l'APM (api.ivry.local),
+// pas sur un serveur dédié : IA_API_URL/IA_API_KEY ne sont donc à renseigner que
+// si l'IA Locale est un jour séparée de l'APM ; par défaut on retombe sur
+// APM_API_URL/APM_API_KEY (confirmé — cf. 01_ARCHITECTURE_TECHNIQUE.md pour le
+// contexte, mais l'IA Locale n'a pas de serveur propre).
 // TODO: confirmer le contrat exact (chemins, format de payload, streaming ou
 // non) auprès de l'équipe qui héberge l'IA Locale — les endpoints ci-dessous
 // suivent le même pattern que les autres API Ville en attendant cette doc.
-const axios = require('axios');
+const { createServiceClient, isReachable } = require('./httpClient');
 
-const IA_URL = process.env.IA_API_URL;
-const IA_KEY = process.env.IA_API_KEY;
+const IA_URL = process.env.IA_API_URL || process.env.APM_API_URL || 'https://api.ivry.local';
+const IA_KEY = process.env.IA_API_KEY || process.env.APM_API_KEY;
 
-const client = axios.create({
+const client = createServiceClient({
   baseURL: IA_URL,
   timeout: 30_000, // une génération peut être plus longue qu'un simple CRUD
   headers: { 'X-API-KEY': IA_KEY },
@@ -53,7 +54,7 @@ async function ping() {
     await client.get('/api/status', { timeout: 3000 });
     return { ok: true };
   } catch (err) {
-    return { ok: false, detail: err.message };
+    return isReachable(err) ? { ok: true, detail: `répond mais: ${err.message}` } : { ok: false, detail: err.message };
   }
 }
 

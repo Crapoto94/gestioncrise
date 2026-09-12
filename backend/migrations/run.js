@@ -1,9 +1,12 @@
 // Exécute les fichiers migrations/NNN_*.sql dans l'ordre, un par un, en les
 // enregistrant dans pgc._migrations pour ne jamais rejouer une migration déjà
 // appliquée (cf. GUIDE §6 "Migrations versionnées").
-require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+// Même règle de résolution que server.js: backend/.env prioritaire, sinon .env racine.
+const localEnvPath = path.join(__dirname, '..', '.env');
+const rootEnvPath = path.join(__dirname, '..', '..', '.env');
+require('dotenv').config({ path: fs.existsSync(localEnvPath) ? localEnvPath : rootEnvPath });
 const { pool } = require('../pg_db');
 
 async function run() {
