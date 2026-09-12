@@ -87,11 +87,19 @@ export interface CrisisDecision {
   description: string | null;
   status: 'a_faire' | 'en_cours' | 'fait' | 'abandonnee';
   due_at: string | null;
+  created_at?: string;
   owner_label?: string | null;
   owner_display_name?: string | null;
   owner_username?: string | null;
   horizon?: 'court_terme' | 'moyen_long_terme';
   source?: 'manuel' | 'ia';
+  acknowledged_at?: string | null;
+  acknowledged_by?: number | null;
+  acknowledged_by_display_name?: string | null;
+  acknowledged_by_username?: string | null;
+  acknowledgment_comment?: string | null;
+  crisis_title?: string;
+  crisis_status?: CrisisStatus;
 }
 
 export interface CrisisDocument {

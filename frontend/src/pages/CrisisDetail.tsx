@@ -5,6 +5,7 @@ import { api, downloadFile } from '../services/api';
 import { SeverityBadge } from '../components/StatusBadge';
 import { Timeline } from '../components/Timeline';
 import { WorkflowStepper } from '../components/WorkflowStepper';
+import { AcknowledgeModal } from '../components/AcknowledgeModal';
 import { markdownToHtml } from '../utils/markdown';
 import { TYPE_LABELS } from '../constants/crisisTypes';
 import type { Crisis, CrisisType, Severity, CrisisEvent, CrisisDecision, CrisisDocument, CrisisCommunication, CrisisMailbox, TeamsThreadResult } from '../types';
@@ -306,6 +307,7 @@ function DecisionsTab({ crisisId }: { crisisId: number }) {
   const [title, setTitle] = useState('');
   const [ownerLabel, setOwnerLabel] = useState('');
   const [horizon, setHorizon] = useState<'court_terme' | 'moyen_long_terme'>('court_terme');
+  const [acknowledging, setAcknowledging] = useState<CrisisDecision | null>(null);
 
   function load() { api.get(`/crises/${crisisId}/decisions`).then((r) => setDecisions(r.data)); }
   useEffect(load, [crisisId]);
@@ -323,6 +325,13 @@ function DecisionsTab({ crisisId }: { crisisId: number }) {
     load();
   }
 
+  async function acknowledge(comment: string, status: string) {
+    if (!acknowledging) return;
+    await api.post(`/decisions/${acknowledging.id}/acknowledge`, { comment, status });
+    setAcknowledging(null);
+    load();
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-sm p-4 space-y-4">
       <form onSubmit={submit} className="flex flex-wrap gap-2">
@@ -337,20 +346,40 @@ function DecisionsTab({ crisisId }: { crisisId: number }) {
       </form>
       <ul className="space-y-2">
         {decisions.map((d) => (
-          <li key={d.id} className="flex items-center justify-between border rounded p-2 text-sm gap-2">
-            <div>
-              <span>{d.title}</span>
-              {(d.owner_label || d.owner_display_name) && <span className="text-gray-400"> — {d.owner_label || d.owner_display_name}</span>}
-              <span className="text-[10px] uppercase tracking-wide text-gray-400 ml-2">{HORIZON_LABELS[d.horizon || 'court_terme']}</span>
-              {d.source === 'ia' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">IA</span>}
+          <li key={d.id} className="border rounded p-2 text-sm space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <span>{d.title}</span>
+                {(d.owner_label || d.owner_display_name) && <span className="text-gray-400"> — {d.owner_label || d.owner_display_name}</span>}
+                <span className="text-[10px] uppercase tracking-wide text-gray-400 ml-2">{HORIZON_LABELS[d.horizon || 'court_terme']}</span>
+                {d.source === 'ia' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">IA</span>}
+                {d.created_at && <span className="text-[10px] text-gray-400 ml-2">prise le {new Date(d.created_at).toLocaleDateString('fr-FR')}</span>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <select value={d.status} onChange={(e) => setStatus(d.id, e.target.value)} className="border rounded px-2 py-1 text-xs">
+                  {['a_faire', 'en_cours', 'fait', 'abandonnee'].map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                {d.acknowledged_at ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">Acquittée</span>
+                ) : (
+                  <button onClick={() => setAcknowledging(d)} className="text-xs border px-2 py-1 rounded hover:bg-gray-50">Acquitter</button>
+                )}
+              </div>
             </div>
-            <select value={d.status} onChange={(e) => setStatus(d.id, e.target.value)} className="border rounded px-2 py-1 text-xs shrink-0">
-              {['a_faire', 'en_cours', 'fait', 'abandonnee'].map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            {d.acknowledged_at && (
+              <div className="bg-gray-50 border rounded p-2 text-xs text-gray-600">
+                Acquittée le {new Date(d.acknowledged_at).toLocaleString('fr-FR')}
+                {(d.acknowledged_by_display_name || d.acknowledged_by_username) && <> par {d.acknowledged_by_display_name || d.acknowledged_by_username}</>}
+                {d.acknowledgment_comment && <p className="mt-1 whitespace-pre-wrap">{d.acknowledgment_comment}</p>}
+              </div>
+            )}
           </li>
         ))}
         {decisions.length === 0 && <p className="text-sm text-gray-400">Aucune décision.</p>}
       </ul>
+      {acknowledging && (
+        <AcknowledgeModal decision={acknowledging} onCancel={() => setAcknowledging(null)} onConfirm={acknowledge} />
+      )}
     </div>
   );
 }

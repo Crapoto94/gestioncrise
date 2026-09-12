@@ -94,14 +94,34 @@ const addDecision = (crisisId, { title, description, ownerId, ownerLabel, horizo
     [crisisId, title, description || null, ownerId || null, ownerLabel || null, horizon || 'court_terme', dueAt || null, createdBy || null, source || 'manuel']
   );
 
+// Sous-requête commune (jointure agent + crise) — réutilisée par la vue par
+// crise (listDecisions) et par la vue transverse toutes crises (listAll).
+const DECISION_SELECT = `
+  SELECT d.*, u.display_name AS owner_display_name, u.username AS owner_username,
+         a.display_name AS acknowledged_by_display_name, a.username AS acknowledged_by_username,
+         c.title AS crisis_title, c.status AS crisis_status
+  FROM pgc.crisis_decisions d
+  LEFT JOIN pgc.users u ON u.id = d.owner_id
+  LEFT JOIN pgc.users a ON a.id = d.acknowledged_by
+  JOIN pgc.crises c ON c.id = d.crisis_id
+`;
+
 const listDecisions = (crisisId) =>
-  db.all(
-    `SELECT d.*, u.display_name AS owner_display_name, u.username AS owner_username
-     FROM pgc.crisis_decisions d
-     LEFT JOIN pgc.users u ON u.id = d.owner_id
-     WHERE d.crisis_id = $1 ORDER BY d.created_at ASC`,
-    [crisisId]
-  );
+  db.all(`${DECISION_SELECT} WHERE d.crisis_id = $1 ORDER BY d.created_at ASC`, [crisisId]);
+
+// Vue transverse à toutes les crises — "Décisions en attente" (jamais
+// acquittées) vs "Archives" (acquittées), avec la crise associée.
+const listAllDecisions = ({ acknowledged } = {}) => {
+  const clauses = [];
+  const params = [];
+  if (acknowledged === true) clauses.push('d.acknowledged_at IS NOT NULL');
+  if (acknowledged === false) clauses.push('d.acknowledged_at IS NULL');
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  const order = acknowledged ? 'd.acknowledged_at DESC' : 'd.created_at DESC';
+  return db.all(`${DECISION_SELECT} ${where} ORDER BY ${order}`, params);
+};
+
+const findDecisionById = (id) => db.get(`${DECISION_SELECT} WHERE d.id = $1`, [id]);
 
 const removeDecisionsBySource = (crisisId, source) =>
   db.run('DELETE FROM pgc.crisis_decisions WHERE crisis_id = $1 AND source = $2', [crisisId, source]);
@@ -117,6 +137,22 @@ const updateDecision = (id, { status, title, description, ownerId, ownerLabel, h
   params.push(id);
   return db.get(
     `UPDATE pgc.crisis_decisions SET ${sets.join(', ')}, updated_at = now() WHERE id = $${params.length} RETURNING *`,
+    params
+  );
+};
+
+// Acquitte une décision : trace qui/quand/pourquoi, indépendamment du
+// statut de traitement (fait/abandonnee/...) qu'on met à jour au passage
+// si fourni. Ré-acquitter (ex. commentaire corrigé) écrase la précédente
+// acquittance plutôt que d'en garder l'historique — cohérent avec le
+// reste du module (pas de versionning des décisions).
+const acknowledgeDecision = (id, { comment, status, userId }) => {
+  const sets = ['acknowledged_at = now()', 'acknowledged_by = $1', 'acknowledgment_comment = $2', 'updated_at = now()'];
+  const params = [userId, comment || null];
+  if (status) { params.push(status); sets.push(`status = $${params.length}`); }
+  params.push(id);
+  return db.get(
+    `UPDATE pgc.crisis_decisions SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
     params
   );
 };
@@ -142,6 +178,7 @@ const removeMember = (crisisId, userId) =>
 module.exports = {
   WORKFLOW_ORDER, list, findById, create, update, setStatus,
   addEvent, listEvents, removeEventsBySource,
-  addDecision, listDecisions, removeDecisionsBySource, updateDecision,
+  addDecision, listDecisions, listAllDecisions, findDecisionById,
+  removeDecisionsBySource, updateDecision, acknowledgeDecision,
   addMember, listMembers, removeMember, saveTeamsImport, saveIaAnalysis,
 };

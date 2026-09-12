@@ -72,7 +72,10 @@ export function Dashboard() {
           </div>
 
           <section className="bg-white rounded-lg shadow-sm p-4">
-            <h2 className="font-medium mb-3">Décisions en attente</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-medium">Décisions en attente</h2>
+              <Link to="/decisions" className="text-xs text-ville hover:underline">Suivi & acquittement →</Link>
+            </div>
             {summary.recentDecisions.length === 0 && <p className="text-sm text-gray-500">Aucune décision en attente.</p>}
             <ul className="space-y-2">
               {summary.recentDecisions.map((d) => (
