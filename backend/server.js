@@ -72,6 +72,7 @@ app.use('/api/v1/referentiels', require('./modules/referentiels/referentiels.rou
 app.use('/api/v1/notifications', require('./modules/notifications/notifications.routes'));
 app.use('/api/v1/dashboard', require('./modules/dashboard/dashboard.routes'));
 app.use('/api/v1/ia', require('./modules/ia/ia.routes'));
+app.use('/api/v1/pcgcn', require('./modules/pcgcn/pcgcn.routes'));
 app.use('/api/v1/admin', require('./modules/admin/admin.routes'));
 app.use('/api/v1/audit', require('./modules/audit/audit.routes'));
 

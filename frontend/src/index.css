@@ -5,3 +5,10 @@
 body {
   @apply bg-gray-50 text-gray-900;
 }
+
+/* Rendu du markdown léger des rubriques PCGCN (voir utils/markdown.ts) */
+.rendered-content h3 { @apply text-base font-semibold mt-2 mb-1; }
+.rendered-content h4 { @apply text-sm font-semibold mt-2 mb-1; }
+.rendered-content h5 { @apply text-sm font-medium mt-1 mb-1; }
+.rendered-content p { @apply mb-2; }
+.rendered-content ul { @apply list-disc list-inside mb-2; }

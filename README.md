@@ -6,6 +6,30 @@ conventions de [`GUIDE_NOUVELLE_APP_VILLE.md`](./GUIDE_NOUVELLE_APP_VILLE.md)
 et aux specs [`00_VISION_PRODUIT.md`](./00_VISION_PRODUIT.md) à
 [`08_SECURITE_AUDIT_EXPORTS.md`](./08_SECURITE_AUDIT_EXPORTS.md).
 
+## PCGCN — Plan Communal de Gestion de Crise Numérique
+
+Menu dédié (`/pcgcn`), en 3 tomes :
+
+- **Tome 1 — Plan** (`backend/modules/pcgcn`) : gouvernance, niveaux de crise,
+  rôles, communication, juridique, annexes (texte + PDF joints, éditable dans
+  l'app) ; les rubriques PCA/PRA reprennent directement les modules PCA/PRA
+  existants (pas de double saisie).
+- **Tome 2 — Fiches réflexes** : une fiche par scénario (ransomware, M365,
+  fuite de données, panne datacenter, téléphonie, réseau, écoles, police
+  municipale, autre...), gabarit commun (déclencheurs / premiers réflexes /
+  procédure / contacts clés) + PDF joints ; la fiche "écoles" affiche en plus
+  le référentiel écoles (Hub DSI) en direct.
+- **Tome 3 — Annuaire de crise** : Élus lus en direct depuis Hub DSI (jamais
+  dupliqués), Contacts internes (saisie manuelle + synchronisation STUDIO RH
+  en base, complétée manuellement pour les champs spécifiques crise :
+  astreinte, rôle en cellule), Prestataires et Organismes externes (saisie
+  manuelle + PDF).
+
+**Export HTML autonome** (`GET /api/v1/pcgcn/export/html`) : consolide les 3
+tomes en **un seul fichier** consultable hors-ligne — les PDF joints sont
+encodés en base64 directement dans la page (aucun fichier externe requis),
+pour servir de version de secours/imprimable en cas de panne complète du SI.
+
 ## Stack
 
 - **Backend** : Node.js + Express 5, PostgreSQL (schéma dédié `pgc`), JWT applicatif, Swagger.

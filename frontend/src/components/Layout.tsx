@@ -2,14 +2,16 @@ import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard, AlertTriangle, FileText, ShieldCheck, LifeBuoy,
-  Map, Send, ClipboardList, Settings, LogOut,
+  Map, Send, ClipboardList, Settings, LogOut, BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-// Les 9 menus de 07_UI_UX_ECRANS.md.
+// Les 9 menus de 07_UI_UX_ECRANS.md + PCGCN (plan communal de gestion de
+// crise numérique, demandé en complément des specs initiales).
 const MENU = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/crises', label: 'Crises', icon: AlertTriangle },
+  { to: '/pcgcn', label: 'PCGCN', icon: BookOpen },
   { to: '/documentation', label: 'Documentation', icon: FileText },
   { to: '/pca', label: 'PCA', icon: ShieldCheck },
   { to: '/pra', label: 'PRA', icon: LifeBuoy },

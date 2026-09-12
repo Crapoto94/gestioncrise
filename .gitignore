@@ -12,3 +12,4 @@ coverage/
 *.pgdata/
 pgdata/
 .claude/settings.local.json
+*.tsbuildinfo

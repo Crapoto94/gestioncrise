@@ -13,6 +13,7 @@ import { Cartographie } from './pages/Cartographie';
 import { Communication } from './pages/Communication';
 import { Retex } from './pages/Retex';
 import { Admin } from './pages/Admin';
+import { Pcgcn } from './pages/Pcgcn';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="crises" element={<Crises />} />
         <Route path="crises/:id" element={<CrisisDetail />} />
         <Route path="documentation" element={<Documentation />} />
+        <Route path="pcgcn" element={<Pcgcn />} />
         <Route path="pca" element={<Pca />} />
         <Route path="pra" element={<Pra />} />
         <Route path="cartographie" element={<Cartographie />} />
