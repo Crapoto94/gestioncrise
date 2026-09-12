@@ -13,6 +13,8 @@ export function AcknowledgeModal({ decision, onCancel, onConfirm }: {
 }) {
   const [comment, setComment] = useState('');
   const [status, setStatus] = useState<string>(decision.status === 'a_faire' || decision.status === 'en_cours' ? 'fait' : decision.status);
+  const isIaProposal = !!decision.source?.startsWith('ia_');
+  const commentMissing = isIaProposal && !comment.trim();
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
@@ -26,11 +28,13 @@ export function AcknowledgeModal({ decision, onCancel, onConfirm }: {
           </select>
         </div>
         <div>
-          <label className="block text-sm text-gray-600 mb-1">Commentaire</label>
+          <label className="block text-sm text-gray-600 mb-1">
+            Commentaire {isIaProposal && <span className="text-red-500">— obligatoire pour une proposition IA</span>}
+          </label>
           <textarea
             className="w-full border rounded px-3 py-2 text-sm"
             rows={3}
-            placeholder="Ce qui a été fait, ou pourquoi la décision est classée ainsi…"
+            placeholder="Ce qui a été vérifié/fait, ou pourquoi la décision est classée ainsi…"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             autoFocus
@@ -38,7 +42,12 @@ export function AcknowledgeModal({ decision, onCancel, onConfirm }: {
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onCancel} className="px-3 py-2 text-sm rounded border">Annuler</button>
-          <button onClick={() => onConfirm(comment, status)} className="px-3 py-2 text-sm rounded bg-ville text-white hover:bg-ville-dark">
+          <button
+            onClick={() => onConfirm(comment, status)}
+            disabled={commentMissing}
+            title={commentMissing ? 'Un commentaire est requis pour acquitter une proposition IA.' : undefined}
+            className="px-3 py-2 text-sm rounded bg-ville text-white hover:bg-ville-dark disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             Confirmer l'acquittement
           </button>
         </div>

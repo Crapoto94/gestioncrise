@@ -67,6 +67,7 @@ app.use('/api/v1/users', require('./modules/users/users.routes'));
 app.use('/api/v1/crises', require('./modules/crises/crises.routes'));
 app.use('/api/v1/decisions', require('./modules/decisions/decisions.routes'));
 app.use('/api/v1/reference-documents', require('./modules/referenceDocuments/referenceDocuments.routes'));
+app.use('/api/v1/monitoring-channels', require('./modules/monitoringChannels/monitoringChannels.routes'));
 app.use('/api/v1/crises/:id/documents', require('./modules/documents/documents.routes'));
 app.use('/api/v1/crises/:id/communications', require('./modules/communications/communications.routes'));
 app.use('/api/v1/crises/:id/retex', require('./modules/retex/retex.routes'));
@@ -99,6 +100,7 @@ async function start() {
     console.log(`[PGC backend] documentation Swagger: http://localhost:${PORT}/api-docs`);
   });
   require('./services/realtimeAnalysis').start();
+  require('./services/monitoringChannelsPoller').start();
 }
 
 start().catch((err) => {

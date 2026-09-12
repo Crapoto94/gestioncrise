@@ -3,6 +3,7 @@ const controller = require('./crises.controller');
 const { requireAuth } = require('../../middlewares/auth');
 const { requireRole } = require('../../middlewares/roles');
 const { auditLog } = require('../../middlewares/audit');
+const { upload } = require('../../middlewares/upload');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -33,6 +34,7 @@ router.post('/:id/transition', auditLog('crises'), controller.transition);
 
 router.post('/:id/teams/import', auditLog('crises'), controller.importTeamsThread);
 router.post('/:id/teams/sync', auditLog('crises'), controller.syncTeams);
+router.post('/:id/teams/acknowledge', upload.single('file'), auditLog('crises'), controller.acknowledgeRealtimeAnalysis);
 router.post('/:id/analyze', controller.startAnalysis);
 router.get('/:id/analyze/status/:jobId', controller.getAnalysisStatus);
 

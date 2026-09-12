@@ -62,12 +62,32 @@ const saveIaAnalysis = (id, { analysis, model }) =>
 // Analyse IA temps réel (rafraîchie automatiquement toutes les 5 minutes
 // tant que la crise est ouverte, cf. services/realtimeAnalysis.js) —
 // distincte de ia_analysis (analyse rétrospective déclenchée manuellement).
-const saveRealtimeAnalysis = (id, { analysis, model }) =>
+// `statusSuggestion` : { next, reason } déjà validé (cf.
+// utils/iaAnalysisResponse.js:validateStatusSuggestion) — remis à NULL à
+// chaque analyse pour ne jamais laisser une suggestion périmée affichée
+// (l'IA ne la reformule que si elle est toujours pertinente à ce cycle).
+const saveRealtimeAnalysis = (id, { analysis, model, statusSuggestion }) =>
   db.get(
-    `UPDATE pgc.crises SET ia_realtime_analysis = $1, ia_realtime_analysis_model = $2, ia_realtime_analysis_at = now()
-     WHERE id = $3 RETURNING *`,
-    [analysis, model || null, id]
+    `UPDATE pgc.crises SET ia_realtime_analysis = $1, ia_realtime_analysis_model = $2, ia_realtime_analysis_at = now(),
+       ia_status_suggestion_next = $3, ia_status_suggestion_reason = $4
+     WHERE id = $5 RETURNING *`,
+    [analysis, model || null, statusSuggestion?.next || null, statusSuggestion?.reason || null, id]
   );
+
+/** Acquitte la synthèse IA temps réel (distinct de l'acquittement d'une décision). */
+const acknowledgeRealtimeAnalysis = (id, { comment, userId }) =>
+  db.get(
+    `UPDATE pgc.crises SET ia_realtime_ack_at = now(), ia_realtime_ack_by = $1, ia_realtime_ack_comment = $2, updated_at = now()
+     WHERE id = $3 RETURNING *`,
+    [userId, comment || null, id]
+  );
+
+/** Empreinte du contenu des canaux de surveillance déjà pris en compte au
+ * dernier cycle d'ingestion temps réel de cette crise (cf.
+ * utils/monitoringChannelsContext.js) — permet de savoir si quelque chose
+ * de neuf y est apparu depuis, indépendamment du fil Teams propre à la crise. */
+const saveMonitoringHash = (id, hash) =>
+  db.get(`UPDATE pgc.crises SET ia_realtime_monitoring_hash = $1 WHERE id = $2 RETURNING *`, [hash || null, id]);
 
 // Crises encore ouvertes avec un fil Teams associé — cible du cycle
 // d'analyse temps réel périodique.
@@ -76,11 +96,11 @@ const listOpenWithTeamsThread = () =>
 
 // Trace chaque vérification du fil Teams — permet de savoir si le contenu
 // avait changé et si l'IA a donc été interrogée (voir migration 016).
-const logTeamsSync = (crisisId, { source, changed, iaCalled, transcriptLength }) =>
+const logTeamsSync = (crisisId, { source, changed, iaCalled, transcriptLength, eventsAdded, decisionsAdded }) =>
   db.run(
-    `INSERT INTO pgc.teams_sync_log (crisis_id, source, changed, ia_called, transcript_length)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [crisisId, source, changed, iaCalled, transcriptLength || null]
+    `INSERT INTO pgc.teams_sync_log (crisis_id, source, changed, ia_called, transcript_length, events_added, decisions_added)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [crisisId, source, changed, iaCalled, transcriptLength || null, eventsAdded ?? null, decisionsAdded ?? null]
   );
 
 // Timeline "Synchro Teams + interrogation IA" (bandeau de Crises en cours) —
@@ -261,6 +281,6 @@ module.exports = {
   removeDecisionsBySource, removeUnacknowledgedDecisionsBySource,
   updateDecision, acknowledgeDecision, unacknowledgeDecision, respondToDecision,
   addMember, listMembers, removeMember,
-  saveTeamsImport, saveIaAnalysis, saveRealtimeAnalysis, listOpenWithTeamsThread,
+  saveTeamsImport, saveIaAnalysis, saveRealtimeAnalysis, acknowledgeRealtimeAnalysis, saveMonitoringHash, listOpenWithTeamsThread,
   logTeamsSync, listRecentTeamsSyncLogs,
 };

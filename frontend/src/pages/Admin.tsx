@@ -64,6 +64,10 @@ export function Admin() {
         )}
       </section>
 
+      <DefaultModelSelector models={models} />
+
+      <MonitoringChannelsSection />
+
       <PromptEditor
         settingKey="crisis_ia_prompt"
         title="Analyse IA rétrospective des crises — prompt"
@@ -72,11 +76,19 @@ export function Admin() {
       />
 
       <PromptEditor
-        settingKey="crisis_ia_realtime_prompt"
-        title="Analyse IA temps réel des crises ouvertes — prompt"
-        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{TRANSCRIPTION}']}
+        settingKey="crisis_ia_realtime_ingestion_prompt"
+        title="Analyse IA temps réel — étape 1 : ingestion (mise à jour de la main courante)"
+        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{TRANSCRIPTION}', '{CANAUX_SURVEILLANCE}']}
         models={models}
-        hint="Ré-exécuté automatiquement toutes les 5 minutes tant qu'une crise reste ouverte avec un fil Teams associé — l'IA n'est en fait sollicitée que si le fil Teams a changé depuis la dernière vérification."
+        hint="Ré-exécuté automatiquement toutes les 5 minutes tant qu'une crise reste ouverte avec un fil Teams associé — compare le fil Teams et les canaux de surveillance (état infrastructure) à la main courante et n'y ajoute que le nouveau, reformulé."
+      />
+
+      <PromptEditor
+        settingKey="crisis_ia_realtime_diagnostic_prompt"
+        title="Analyse IA temps réel — étape 2 : diagnostic et propositions"
+        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{ACTIONS_EN_COURS}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{DOCUMENTS_CRISE}']}
+        models={models}
+        hint="Enchaîné juste après l'étape 1 (main courante déjà à jour) — affine le diagnostic et propose des actions de vérification/résolution, chacune à acquitter individuellement avec un commentaire obligatoire."
       />
 
       <PromptEditor
@@ -84,7 +96,7 @@ export function Admin() {
         title="Synchro Teams manuelle — prompt"
         placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{ACTIONS_EN_COURS}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{TRANSCRIPTION}']}
         models={models}
-        hint="Déclenché par le bouton « Synchro Teams » (Crises en cours) — fournit en plus la main courante et les actions déjà enregistrées, pour que l'IA ne propose que du nouveau."
+        hint="Déclenché par le bouton « Synchro Teams » (Crises en cours) ou par l'acquittement d'une synthèse IA — fournit en plus la main courante et les actions déjà enregistrées, pour que l'IA ne propose que du nouveau. Toujours exécuté, même sans nouveauté dans Teams (consigne de réflexion approfondie ajoutée automatiquement dans ce cas)."
       />
 
       <section className="bg-white rounded-lg shadow-sm p-4">
@@ -178,6 +190,240 @@ function IaLogSection() {
         </table>
       </div>
     </section>
+  );
+}
+
+/** Modèle IA Locale utilisé par défaut pour toutes les analyses de crise
+ * (rétrospective, temps réel, sync) quand un appel ne précise pas
+ * explicitement de modèle — cf. backend/utils/resolveIaModel.js. */
+function DefaultModelSelector({ models }: { models: string[] }) {
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get('/admin/settings/crisis_ia_default_model').then((r) => setValue(r.data.value || ''));
+  }, []);
+
+  async function save(next: string) {
+    setValue(next);
+    setSaving(true); setMsg(null);
+    try {
+      await api.put('/admin/settings/crisis_ia_default_model', { value: next });
+      setMsg('Enregistré.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-lg shadow-sm p-4">
+      <h2 className="font-medium mb-2">Modèle IA Locale par défaut</h2>
+      <p className="text-xs text-gray-500 mb-3">
+        Utilisé pour toutes les analyses de crise (rétrospective, temps réel, synchro Teams) sauf si un modèle est explicitement choisi au moment de l'analyse.
+      </p>
+      <div className="flex items-center gap-2">
+        <select
+          className="border rounded px-3 py-2 text-sm min-w-[16rem]"
+          value={value}
+          disabled={saving}
+          onChange={(e) => save(e.target.value)}
+        >
+          <option value="">(par défaut de l'IA Locale)</option>
+          {models.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {msg && <span className="text-xs text-gray-500">{msg}</span>}
+      </div>
+    </section>
+  );
+}
+
+interface MonitoringChannel {
+  id: number; label: string; team_id: string; channel_id: string;
+  team_name: string | null; channel_name: string | null; active: boolean;
+  last_checked_at: string | null;
+}
+
+/** Canaux Teams de surveillance temps réel (état infrastructure, switchs...)
+ * — configuration globale, consultée automatiquement toutes les 5 minutes
+ * et injectée comme contexte dans l'analyse temps réel de toutes les
+ * crises ouvertes (cf. backend/services/monitoringChannelsPoller.js). */
+function MonitoringChannelsSection() {
+  const [channels, setChannels] = useState<MonitoringChannel[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    api.get('/monitoring-channels').then((r) => setChannels(r.data)).catch((e) => setError(e.message));
+  }
+  useEffect(load, []);
+
+  async function toggleActive(ch: MonitoringChannel) {
+    await api.patch(`/monitoring-channels/${ch.id}`, { active: !ch.active });
+    load();
+  }
+  async function remove(ch: MonitoringChannel) {
+    if (!confirm(`Supprimer le canal de surveillance « ${ch.label} » ?`)) return;
+    await api.delete(`/monitoring-channels/${ch.id}`);
+    load();
+  }
+
+  return (
+    <section className="bg-white rounded-lg shadow-sm p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-medium">Canaux Teams de surveillance temps réel</h2>
+        <button onClick={() => setShowAdd(true)} className="text-sm bg-ville text-white px-3 py-1.5 rounded hover:bg-ville-dark">
+          + Ajouter un canal
+        </button>
+      </div>
+      <p className="text-xs text-gray-500 mb-3">
+        Canaux Teams (ex : état des switchs, alertes infrastructure) relevés automatiquement toutes les 5 minutes et fournis comme contexte à l'analyse IA temps réel de toutes les crises ouvertes.
+      </p>
+      {error && <p className="text-sm text-red-600 mb-2">{error}</p>}
+      <ul className="divide-y">
+        {channels.map((ch) => (
+          <li key={ch.id} className="py-2 flex items-center justify-between text-sm">
+            <div>
+              <div className="font-medium">{ch.label}</div>
+              <div className="text-xs text-gray-400">
+                {ch.team_name || ch.team_id} / {ch.channel_name || ch.channel_id}
+                {ch.last_checked_at && <> · dernier relevé {new Date(ch.last_checked_at).toLocaleString('fr-FR')}</>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => toggleActive(ch)}
+                className={`text-xs px-2 py-1 rounded ${ch.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+              >
+                {ch.active ? 'Actif' : 'Inactif'}
+              </button>
+              <button onClick={() => remove(ch)} className="text-xs text-red-600 hover:underline">Supprimer</button>
+            </div>
+          </li>
+        ))}
+        {channels.length === 0 && <li className="py-4 text-center text-gray-400 text-sm">Aucun canal de surveillance configuré.</li>}
+      </ul>
+      {showAdd && <AddMonitoringChannelModal onCancel={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); load(); }} />}
+    </section>
+  );
+}
+
+interface GraphTeam { id: string; displayName: string }
+interface GraphChannel { id: string; displayName: string }
+
+function AddMonitoringChannelModal({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
+  const [label, setLabel] = useState('');
+  const [query, setQuery] = useState('');
+  const [teams, setTeams] = useState<GraphTeam[]>([]);
+  const [team, setTeam] = useState<GraphTeam | null>(null);
+  const [channels, setChannels] = useState<GraphChannel[]>([]);
+  const [channel, setChannel] = useState<GraphChannel | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function searchTeams() {
+    setError(null);
+    try {
+      const { data } = await api.get('/monitoring-channels/graph/teams', { params: { q: query } });
+      setTeams(data);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function pickTeam(t: GraphTeam) {
+    setTeam(t); setChannel(null); setChannels([]); setError(null);
+    try {
+      const { data } = await api.get(`/monitoring-channels/graph/teams/${t.id}/channels`);
+      setChannels(data);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function save() {
+    if (!label.trim() || !team || !channel) return;
+    setSaving(true); setError(null);
+    try {
+      await api.post('/monitoring-channels', {
+        label: label.trim(), teamId: team.id, channelId: channel.id,
+        teamName: team.displayName, channelName: channel.displayName,
+      });
+      onCreated();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-5 space-y-3">
+        <h2 className="font-medium">Ajouter un canal de surveillance</h2>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div>
+          <label className="block text-sm text-gray-600 mb-1">Nom affiché</label>
+          <input
+            className="w-full border rounded px-3 py-2 text-sm"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="ex : État des switchs — Hôtel de Ville"
+          />
+        </div>
+        <div>
+          <label className="block text-sm text-gray-600 mb-1">Équipe Teams</label>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 border rounded px-3 py-2 text-sm"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Rechercher une équipe…"
+              onKeyDown={(e) => e.key === 'Enter' && searchTeams()}
+            />
+            <button onClick={searchTeams} className="text-sm px-3 py-2 rounded border">Rechercher</button>
+          </div>
+          {teams.length > 0 && (
+            <ul className="mt-1 border rounded max-h-32 overflow-y-auto text-sm">
+              {teams.map((t) => (
+                <li
+                  key={t.id}
+                  onClick={() => pickTeam(t)}
+                  className={`px-3 py-1.5 cursor-pointer hover:bg-gray-50 ${team?.id === t.id ? 'bg-ville/10 font-medium' : ''}`}
+                >
+                  {t.displayName}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {team && (
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">Canal ({team.displayName})</label>
+            <ul className="border rounded max-h-32 overflow-y-auto text-sm">
+              {channels.map((c) => (
+                <li
+                  key={c.id}
+                  onClick={() => setChannel(c)}
+                  className={`px-3 py-1.5 cursor-pointer hover:bg-gray-50 ${channel?.id === c.id ? 'bg-ville/10 font-medium' : ''}`}
+                >
+                  {c.displayName}
+                </li>
+              ))}
+              {channels.length === 0 && <li className="px-3 py-1.5 text-gray-400">Aucun canal.</li>}
+            </ul>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onCancel} className="px-3 py-2 text-sm rounded border">Annuler</button>
+          <button
+            onClick={save}
+            disabled={saving || !label.trim() || !team || !channel}
+            className="px-3 py-2 text-sm rounded bg-ville text-white hover:bg-ville-dark disabled:opacity-50"
+          >
+            {saving ? 'Enregistrement…' : 'Ajouter'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

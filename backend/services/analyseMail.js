@@ -31,6 +31,44 @@ const getBoiteDetail = (id) => unwrap(client.get(`/api/v1/boites/${id}`), 'boite
 const getMonitoredMailboxes = () => unwrap(client.get('/api/v1/monitored-mailboxes'), 'monitored-mailboxes');
 
 /**
+ * Déclenche une (re)génération de la synthèse IA d'une boîte compromise côté
+ * Analyse Mail — asynchrone, suivi via `getAiAnalyzeJobStatus`. Sans cet
+ * appel, `ai_analysis` ne se remplit QUE si quelqu'un a cliqué sur
+ * "Analyser avec l'IA" dans l'interface d'Analyse Mail elle-même (ou si
+ * l'import automatique avait un fournisseur IA configuré au moment de
+ * l'ajout de la boîte) — jamais depuis PGC.
+ */
+const startAiAnalysis = (bid) => unwrap(client.post(`/api/v1/boites/${bid}/ai-analyze`), 'ai-analyze');
+
+const getAiAnalyzeJobStatus = (jobId) => unwrap(client.get(`/api/v1/jobs/${jobId}`), 'job-status');
+
+const AI_ANALYSIS_POLL_MS = 2000;
+const AI_ANALYSIS_MAX_WAIT_MS = 60_000;
+
+/**
+ * Déclenche l'analyse IA d'une boîte et attend sa fin (borné à
+ * AI_ANALYSIS_MAX_WAIT_MS) — best-effort : si le délai est dépassé ou que
+ * l'appel échoue (ex. aucun fournisseur IA configuré côté Analyse Mail), on
+ * n'échoue pas la synthèse pour autant, on renvoie juste false et
+ * l'appelant garde ce qu'il avait déjà (findings sans synthèse IA).
+ */
+async function ensureAiAnalysis(bid) {
+  try {
+    const { job_id: jobId } = await startAiAnalysis(bid);
+    const deadline = Date.now() + AI_ANALYSIS_MAX_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, AI_ANALYSIS_POLL_MS));
+      const status = await getAiAnalyzeJobStatus(jobId);
+      if (status.status === 'done') return true;
+      if (status.status === 'error') return false;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Pour une adresse mail donnée, retourne la meilleure synthèse disponible :
  * priorité à une boîte déclarée compromise (analyse + IA), sinon repli sur la
  * surveillance continue (verdict/score du dernier scan) si elle existe.
@@ -47,13 +85,22 @@ async function getSyntheseForEmail(email) {
   const boites = (await getBoitesByEmail(target)).filter((b) => (b.user_email || '').toLowerCase() === target);
   if (boites.length) {
     // La plus récente déclaration de compromission pour cette adresse.
-    const detail = await getBoiteDetail(boites[0].id);
+    let detail = await getBoiteDetail(boites[0].id);
     if ((detail.user_email || '').toLowerCase() !== target) {
       throw new Error(`Analyse Mail a renvoyé une boîte pour une autre adresse (${detail.user_email}) — vérifier la version déployée de l'API.`);
+    }
+    // La synthèse IA n'est jamais générée automatiquement côté Analyse Mail
+    // sans fournisseur IA configuré au moment de l'ajout — on la déclenche
+    // ici si elle manque encore, plutôt que de rester bloqué indéfiniment
+    // sur la seule liste de findings heuristiques.
+    if (!detail.ai_analysis) {
+      const done = await ensureAiAnalysis(detail.id);
+      if (done) detail = await getBoiteDetail(detail.id);
     }
     return {
       source: 'boite_compromise',
       email,
+      externalId: detail.id,
       verdict: detail.risk_verdict,
       score: detail.risk_score,
       findings: detail.findings,
@@ -69,6 +116,7 @@ async function getSyntheseForEmail(email) {
     return {
       source: 'surveillance',
       email,
+      externalId: null,
       verdict: match.last_scan_verdict,
       score: match.last_scan_score,
       findings: null,

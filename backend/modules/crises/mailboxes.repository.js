@@ -18,15 +18,15 @@ const addMailbox = (crisisId, email, createdBy) =>
     [crisisId, email.trim().toLowerCase(), createdBy || null]
   );
 
-const saveSynthese = (id, { verdict, score, findings, aiAnalysis, aiAnalysisModel, aiAnalysisAt, source }) =>
+const saveSynthese = (id, { verdict, score, findings, aiAnalysis, aiAnalysisModel, aiAnalysisAt, source, externalId }) =>
   db.get(
     `UPDATE pgc.crisis_mailboxes SET
        verdict = $1, score = $2, findings = $3, ai_analysis = $4,
-       ai_analysis_model = $5, ai_analysis_at = $6, source = $7,
+       ai_analysis_model = $5, ai_analysis_at = $6, source = $7, external_id = $8,
        fetch_error = NULL, fetched_at = now()
-     WHERE id = $8 RETURNING *`,
+     WHERE id = $9 RETURNING *`,
     [verdict || null, score ?? null, findings ? JSON.stringify(findings) : null, aiAnalysis || null,
-     aiAnalysisModel || null, aiAnalysisAt || null, source || null, id]
+     aiAnalysisModel || null, aiAnalysisAt || null, source || null, externalId ?? null, id]
   );
 
 const saveFetchError = (id, message) =>

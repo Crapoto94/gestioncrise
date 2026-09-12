@@ -26,12 +26,17 @@ async function list(req, res, next) {
  * courante de la crise associée — pour que l'historique d'une crise
  * reflète les décisions traitées (demande explicite : "nourrir la
  * timeline"), qu'elles viennent d'une saisie manuelle ou d'une proposition
- * de l'analyse IA temps réel.
+ * de l'analyse IA temps réel/sync. Un commentaire est OBLIGATOIRE pour une
+ * proposition IA (source commençant par "ia_") — c'est ce commentaire qui
+ * explique, dans la main courante, ce qui a été vérifié/fait.
  */
 async function acknowledge(req, res, next) {
   try {
     const decision = await repo.findDecisionById(Number(req.params.id));
     if (!decision) throw new HttpError(404, 'Décision introuvable');
+    if (decision.source?.startsWith('ia_') && !req.body.comment?.trim()) {
+      throw new HttpError(400, 'Un commentaire est requis pour acquitter une proposition IA.');
+    }
     const updated = await repo.acknowledgeDecision(decision.id, {
       comment: req.body.comment, status: req.body.status, userId: req.user.id,
     });

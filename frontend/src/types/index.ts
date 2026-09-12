@@ -53,6 +53,8 @@ export interface CrisisMailbox {
   ai_analysis_model: string | null;
   ai_analysis_at: string | null;
   source: 'boite_compromise' | 'surveillance' | null;
+  external_id: number | null;
+  analyse_mail_url: string | null;
   fetch_error: string | null;
   fetched_at: string | null;
   created_at: string;
@@ -95,7 +97,7 @@ export interface CrisisDecision {
   owner_display_name?: string | null;
   owner_username?: string | null;
   horizon?: 'court_terme' | 'moyen_long_terme';
-  source?: 'manuel' | 'ia' | 'ia_realtime';
+  source?: 'manuel' | 'ia' | 'ia_realtime' | 'ia_sync';
   acknowledged_at?: string | null;
   acknowledged_by?: number | null;
   acknowledged_by_display_name?: string | null;

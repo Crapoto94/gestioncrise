@@ -9,9 +9,11 @@ const ia = require('../../services/ia');
 const analyseMail = require('../../services/analyseMail');
 const settingsRepo = require('../admin/settings.repository');
 const { HttpError } = require('../../middlewares/errorHandler');
-const { parseAnalysisResponse, VALID_HORIZONS } = require('../../utils/iaAnalysisResponse');
+const { parseAnalysisResponse, validateStatusSuggestion, VALID_HORIZONS, NO_CHANGE_REFLECTION_SUFFIX } = require('../../utils/iaAnalysisResponse');
 const { buildCrisisHistoryContext } = require('../../utils/crisisHistoryContext');
 const { buildDocumentReferenceContext } = require('../../utils/documentReferenceContext');
+const { buildCrisisDocumentsContext } = require('../../utils/crisisDocumentsContext');
+const { resolveIaModel } = require('../../utils/resolveIaModel');
 const referenceDocumentsRepo = require('../referenceDocuments/referenceDocuments.repository');
 const { UPLOAD_DIR } = require('../../middlewares/upload');
 
@@ -45,14 +47,23 @@ CRISES PASSÉES SIMILAIRES (pour t'appuyer sur des précédents connus) :
 DOCUMENTS DE RÉFÉRENCE (procédures, chartes...) :
 {DOCUMENTS_REFERENCE}
 
+DOCUMENTS JOINTS À CETTE CRISE :
+{DOCUMENTS_CRISE}
+
 DISCUSSION TEAMS :
 {TRANSCRIPTION}
 
 Réponds en Markdown (ce qui est nouveau, recommandations immédiates — appuie-toi
 sur l'historique et les documents ci-dessus quand c'est pertinent), puis un
-unique bloc \`\`\`json avec les clés "chronologie" (tableau de {date, contenu} —
-uniquement le nouveau), "actions" (tableau de {quoi, qui, terme} — uniquement
-les nouvelles) et "messageTeams" (texte des recommandations immédiates).`;
+unique bloc \`\`\`json avec les clés :
+- "chronologie" : tableau de {date, contenu} — uniquement le nouveau.
+- "actions" : tableau de {quoi, qui, terme} — uniquement les nouvelles.
+- "messageTeams" : texte des recommandations immédiates.
+- "statutPropose" : {suivant, motif} SEULEMENT si la crise est prête à
+  passer à l'étape SUIVANTE du workflow (detection -> qualification ->
+  cellule -> resolution -> retex -> cloturee, jamais un saut), avec "motif"
+  expliquant ce qui justifie ce passage et ce qu'il reste à faire ensuite.
+  Omets cette clé (ou "suivant": null) si l'étape actuelle reste appropriée.`;
 
 // Jobs d'analyse IA asynchrones (même principe que appdsi/transcriptmanager :
 // réponse HTTP immédiate avec un jobId, traitement en arrière-plan, le front
@@ -233,7 +244,7 @@ async function startAnalysis(req, res, next) {
 
         job.status = "envoi à l'IA Locale";
         job.progress = 40;
-        const model = req.body?.model || undefined;
+        const model = await resolveIaModel(settingsRepo, req.body?.model);
         const raw = await ia.queryAi(prompt, model, { kind: 'retrospective', crisisId: crisis.id });
         const { synthese, chronologie, actions } = parseAnalysisResponse(raw);
 
@@ -297,42 +308,32 @@ function getAnalysisStatus(req, res) {
  * l'existant) — synthèse affichée dans PGC, pas de publication automatique
  * dans Teams (voir services/graph.js pour le pourquoi). Même registre de
  * jobs que l'analyse rétrospective (asynchrone, poll via jobId).
+ *
+ * Factorisée en startSyncJob() (démarre le job, retourne le jobId) pour
+ * être appelée aussi bien depuis la route HTTP que depuis l'acquittement de
+ * la synthèse IA (qui doit relancer une analyse fraîche incluant le
+ * commentaire tout juste ajouté à la main courante).
  */
-async function syncTeams(req, res, next) {
-  try {
-    const crisis = await repo.findById(Number(req.params.id));
-    if (!crisis) throw new HttpError(404, 'Crise introuvable');
-    if (!crisis.teams_thread_id) throw new HttpError(400, "Aucun fil Teams associé à cette crise.");
+function startSyncJob(crisis, explicitModel) {
+  const jobId = `sync_${Date.now()}_${crisis.id}`;
+  analyzeJobs[jobId] = { status: 'starting', progress: 0, crisisId: crisis.id, createdAt: Date.now() };
 
-    const jobId = `sync_${Date.now()}_${crisis.id}`;
-    analyzeJobs[jobId] = { status: 'starting', progress: 0, crisisId: crisis.id, createdAt: Date.now() };
-    res.json({ jobId });
-
-    (async () => {
+  (async () => {
       const job = analyzeJobs[jobId];
       try {
         job.status = 'actualisation du fil Teams';
         job.progress = 15;
         const imported = await graph.importCrisisThread(crisis.teams_thread_id);
-        // Rien de nouveau depuis la dernière vérification ? Le transcript
-        // est réenregistré (teams_imported_at à jour) mais on n'interroge
-        // pas l'IA pour ré-analyser un contenu identique.
+        // `changed` ne sert plus qu'à choisir la consigne envoyée à l'IA
+        // (cf. NO_CHANGE_REFLECTION_SUFFIX) : l'IA est désormais toujours
+        // interrogée, même fil Teams identique — une synchro déclenchée
+        // manuellement ou par un acquittement de synthèse (qui vient
+        // d'ajouter un commentaire à la main courante, pas au fil Teams)
+        // doit produire un avis frais, pas rester silencieuse.
         const changed = imported.transcript !== (crisis.teams_transcript || '');
         const updated = await repo.saveTeamsImport(crisis.id, {
           teamId: imported.teamId, channelId: imported.channelId, threadId: imported.threadId, transcript: imported.transcript,
         });
-        await repo.logTeamsSync(crisis.id, {
-          source: 'sync', changed, iaCalled: changed, transcriptLength: imported.transcript.length,
-        });
-        if (!changed) {
-          job.status = 'completed';
-          job.progress = 100;
-          job.skipped = true;
-          job.analysis = "Aucune nouvelle information dans Teams depuis la dernière vérification — analyse IA non relancée.";
-          job.eventsAdded = 0;
-          job.decisionsAdded = 0;
-          return;
-        }
 
         job.status = 'préparation du prompt';
         job.progress = 30;
@@ -346,10 +347,11 @@ async function syncTeams(req, res, next) {
 
         const historiqueText = await buildCrisisHistoryContext(repo, crisis.id);
         const documentsText = await buildDocumentReferenceContext(referenceDocumentsRepo);
+        const crisisDocumentsText = await buildCrisisDocumentsContext(documentsRepo, crisis.id);
 
         const promptRow = await settingsRepo.get('crisis_ia_sync_prompt');
         const template = promptRow?.setting_value || DEFAULT_SYNC_PROMPT;
-        const prompt = template
+        let prompt = template
           .replace('{TITRE}', updated.title)
           .replace('{TYPE}', updated.type)
           .replace('{SEVERITE}', updated.severity)
@@ -358,16 +360,22 @@ async function syncTeams(req, res, next) {
           .replace('{ACTIONS_EN_COURS}', actionsText)
           .replace('{HISTORIQUE_CRISES}', historiqueText)
           .replace('{DOCUMENTS_REFERENCE}', documentsText)
+          .replace('{DOCUMENTS_CRISE}', crisisDocumentsText)
           .replace('{TRANSCRIPTION}', updated.teams_transcript);
+        if (!changed) {
+          prompt += NO_CHANGE_REFLECTION_SUFFIX;
+        }
 
         job.status = "envoi à l'IA Locale";
         job.progress = 55;
-        const raw = await ia.queryAi(prompt, req.body?.model || undefined, { kind: 'sync', crisisId: crisis.id });
-        const { synthese, chronologie, actions, messageTeams } = parseAnalysisResponse(raw, ['messageTeams']);
+        const model = await resolveIaModel(settingsRepo, explicitModel);
+        const raw = await ia.queryAi(prompt, model, { kind: 'sync', crisisId: crisis.id });
+        const { synthese, chronologie, actions, messageTeams, statutPropose } = parseAnalysisResponse(raw);
+        const statusSuggestion = validateStatusSuggestion(statutPropose, updated.status);
 
         job.status = 'enregistrement';
         job.progress = 85;
-        await repo.saveRealtimeAnalysis(crisis.id, { analysis: synthese });
+        await repo.saveRealtimeAnalysis(crisis.id, { analysis: synthese, model, statusSuggestion });
 
         // Dédoublonnage grossier (préfixe du texte) : l'IA a déjà pour
         // consigne de ne proposer que du nouveau, ceci est un filet de
@@ -395,10 +403,16 @@ async function syncTeams(req, res, next) {
           decisionsAdded++;
         }
 
+        await repo.logTeamsSync(crisis.id, {
+          source: 'sync', changed, iaCalled: true, transcriptLength: imported.transcript.length,
+          eventsAdded, decisionsAdded,
+        });
+
         job.status = 'completed';
         job.progress = 100;
         job.analysis = synthese;
         job.messageTeams = messageTeams || null;
+        job.changed = changed;
         job.eventsAdded = eventsAdded;
         job.decisionsAdded = decisionsAdded;
       } catch (err) {
@@ -406,6 +420,51 @@ async function syncTeams(req, res, next) {
         job.error = err.message;
       }
     })();
+
+  return jobId;
+}
+
+async function syncTeams(req, res, next) {
+  try {
+    const crisis = await repo.findById(Number(req.params.id));
+    if (!crisis) throw new HttpError(404, 'Crise introuvable');
+    if (!crisis.teams_thread_id) throw new HttpError(400, "Aucun fil Teams associé à cette crise.");
+    res.json({ jobId: startSyncJob(crisis, req.body?.model) });
+  } catch (err) { next(err); }
+}
+
+/**
+ * Acquitte la synthèse IA temps réel — commentaire (+ photo/fichier joint
+ * optionnel), ajouté à la main courante pour être visible de l'IA lors de
+ * la prochaine synchro (l'API IA Locale est sans état, voir services/ia.js
+ * — c'est le seul moyen de lui faire "voir" ce commentaire). Relance
+ * ensuite une synchro immédiatement pour que le nouveau contexte soit pris
+ * en compte sans attendre le prochain cycle automatique.
+ */
+async function acknowledgeRealtimeAnalysis(req, res, next) {
+  try {
+    const crisis = await repo.findById(Number(req.params.id));
+    if (!crisis) throw new HttpError(404, 'Crise introuvable');
+
+    let documentNote = '';
+    if (req.file) {
+      const doc = await documentsRepo.create({
+        crisisId: crisis.id, filename: req.file.filename, originalName: req.file.originalname,
+        mimeType: req.file.mimetype, sizeBytes: req.file.size, uploadedBy: req.user.id,
+      });
+      documentNote = ` (pièce jointe : ${doc.original_name})`;
+    }
+    if (!req.body.comment && !req.file) throw new HttpError(400, 'Commentaire ou photo requis pour acquitter la synthèse.');
+
+    await repo.acknowledgeRealtimeAnalysis(crisis.id, { comment: req.body.comment, userId: req.user.id });
+    await repo.addEvent(crisis.id, {
+      content: `Synthèse IA acquittée${req.body.comment ? ` — ${req.body.comment}` : ''}${documentNote}`,
+      eventType: 'synthese_ia_acquittee',
+      createdBy: req.user.id,
+    });
+
+    const jobId = crisis.teams_thread_id ? startSyncJob(crisis) : null;
+    res.json({ jobId });
   } catch (err) { next(err); }
 }
 
@@ -428,14 +487,31 @@ async function refreshMailboxSynthese(mailbox) {
       aiAnalysisModel: synthese.aiAnalysisModel,
       aiAnalysisAt: synthese.aiAnalysisAt,
       source: synthese.source,
+      externalId: synthese.externalId,
     });
   } catch (err) {
     return mailboxesRepo.saveFetchError(mailbox.id, err.message);
   }
 }
 
+/** Lien direct vers la fiche de la boîte dans Analyse Mail (interface web,
+ * pas l'API) — la boîte compromise a sa propre page (/boite/<id>), une
+ * boîte seulement sous surveillance continue n'a qu'une page de liste. */
+function withAnalyseMailUrl(mailbox) {
+  const base = (process.env.ANALYSEMAIL_API_URL || '').replace(/\/+$/, '');
+  let analyseMailUrl = null;
+  if (base) {
+    if (mailbox.source === 'boite_compromise' && mailbox.external_id) {
+      analyseMailUrl = `${base}/boite/${mailbox.external_id}`;
+    } else if (mailbox.source === 'surveillance') {
+      analyseMailUrl = `${base}/monitoring`;
+    }
+  }
+  return { ...mailbox, analyse_mail_url: analyseMailUrl };
+}
+
 async function listMailboxes(req, res, next) {
-  try { res.json(await mailboxesRepo.listByCrisis(Number(req.params.id))); } catch (err) { next(err); }
+  try { res.json((await mailboxesRepo.listByCrisis(Number(req.params.id))).map(withAnalyseMailUrl)); } catch (err) { next(err); }
 }
 
 async function addMailbox(req, res, next) {
@@ -444,7 +520,7 @@ async function addMailbox(req, res, next) {
     if (!email || !email.includes('@')) throw new HttpError(400, 'Adresse mail invalide');
     const mailbox = await mailboxesRepo.addMailbox(Number(req.params.id), email, req.user.id);
     const updated = await refreshMailboxSynthese(mailbox);
-    res.status(201).json(updated);
+    res.status(201).json(withAnalyseMailUrl(updated));
   } catch (err) { next(err); }
 }
 
@@ -452,7 +528,7 @@ async function refreshMailbox(req, res, next) {
   try {
     const mailbox = await mailboxesRepo.findById(Number(req.params.mailboxId));
     if (!mailbox || mailbox.crisis_id !== Number(req.params.id)) throw new HttpError(404, 'Boîte introuvable');
-    res.json(await refreshMailboxSynthese(mailbox));
+    res.json(withAnalyseMailUrl(await refreshMailboxSynthese(mailbox)));
   } catch (err) { next(err); }
 }
 
@@ -467,6 +543,7 @@ module.exports = {
   list, listLive, listTeamsSyncLog, getOne, create, update, removeCrisis, transition, listFamilies, listIaModels,
   listEvents, addEvent, listDecisions, addDecision, updateDecision,
   listMembers, addMember, removeMember,
-  searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus, syncTeams,
+  searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus, syncTeams, acknowledgeRealtimeAnalysis,
   listMailboxes, addMailbox, refreshMailbox, removeMailbox,
+  DEFAULT_IA_PROMPT, DEFAULT_SYNC_PROMPT,
 };

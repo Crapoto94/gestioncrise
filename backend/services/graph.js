@@ -168,6 +168,30 @@ async function importCrisisThread(threadId) {
   return { teamId: CRISIS_TEAM_ID, channelId: CRISIS_CHANNEL_ID, threadId, sujet: root.subject, transcript };
 }
 
+const MONITORING_CHANNEL_WINDOW_DAYS = 2;
+
+/**
+ * Importe les messages récents (fenêtre `MONITORING_CHANNEL_WINDOW_DAYS`,
+ * pas de fils/réponses — un canal de surveillance est un flux de messages
+ * indépendants, typiquement postés par un webhook/bot, pas une discussion
+ * threadée) d'un canal Teams QUELCONQUE — contrairement à
+ * `importCrisisThread`, pas limité au canal de crise configuré. Utilisé par
+ * les "canaux de surveillance" (état infrastructure, switchs...) admin.
+ */
+async function importChannelRecentMessages(teamId, channelId, windowDays = MONITORING_CHANNEL_WINDOW_DAYS) {
+  const messages = await listChannelMessages(teamId, channelId);
+  const cutoff = Date.now() - windowDays * 24 * 3600 * 1000;
+  const recent = messages
+    .filter((m) => new Date(m.createdDateTime).getTime() >= cutoff)
+    .sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime));
+  return recent.map((m) => {
+    const auteur = m.from?.user?.displayName || m.from?.application?.displayName || 'Inconnu';
+    const attachmentNote = describeAttachments(m);
+    const texte = [stripHtml(m.body?.content), attachmentNote].filter(Boolean).join(' ');
+    return `[${m.createdDateTime}] ${auteur}: ${texte}`;
+  }).join('\n');
+}
+
 // Note : publier automatiquement dans le fil Teams a été envisagé puis
 // abandonné — Microsoft Graph n'expose "ChannelMessage.Send" qu'en
 // permission Déléguée (utilisateur signé), jamais en Application (app-only,
@@ -192,5 +216,5 @@ async function ping() {
 module.exports = {
   getAccessToken, graphGet, graphGetAll,
   listTeams, listChannels, listChannelMessages, listMessageReplies, findTeamByName,
-  searchCrisisChannelThreads, importCrisisThread, ping,
+  searchCrisisChannelThreads, importCrisisThread, importChannelRecentMessages, ping,
 };

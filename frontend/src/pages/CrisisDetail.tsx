@@ -713,6 +713,11 @@ function MailboxesTab({ crisisId }: { crisisId: number }) {
                 </span>
               )}
               {m.score != null && <span className="text-xs text-gray-400">Score {m.score}/10</span>}
+              {m.analyse_mail_url && (
+                <a href={m.analyse_mail_url} target="_blank" rel="noreferrer" className="text-xs text-ville hover:underline">
+                  Voir dans Analyse Mail ↗
+                </a>
+              )}
             </div>
             <div className="flex items-center gap-3">
               {m.fetched_at && <span className="text-xs text-gray-400">Actualisé le {new Date(m.fetched_at).toLocaleString('fr-FR')}</span>}

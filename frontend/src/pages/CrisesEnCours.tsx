@@ -11,7 +11,7 @@ import { markdownToHtml } from '../utils/markdown';
 import type { Crisis, CrisisDecision } from '../types';
 
 /** Lance la synchro Teams d'une crise (job async) et attend son résultat. */
-async function runTeamsSync(crisisId: number): Promise<{ skipped?: boolean; analysis?: string; eventsAdded?: number; decisionsAdded?: number; error?: string }> {
+async function runTeamsSync(crisisId: number): Promise<{ changed?: boolean; analysis?: string; eventsAdded?: number; decisionsAdded?: number; error?: string }> {
   const { data: job } = await api.post(`/crises/${crisisId}/teams/sync`);
   for (;;) {
     await new Promise((r) => setTimeout(r, 2500));
@@ -61,9 +61,9 @@ export function CrisesEnCours() {
       if (result.error) setError(result.error);
       else setSyncMsg({
         id: crisisId,
-        text: result.skipped
-          ? "Aucune nouveauté dans Teams — analyse IA non relancée."
-          : `Synchro terminée — ${result.eventsAdded ?? 0} événement(s), ${result.decisionsAdded ?? 0} action(s) ajouté(s).`,
+        text: result.changed
+          ? `Synchro terminée — ${result.eventsAdded ?? 0} événement(s), ${result.decisionsAdded ?? 0} action(s) ajouté(s).`
+          : `Aucune nouveauté dans Teams — l'IA a quand même été resollicitée pour une réflexion approfondie (${result.eventsAdded ?? 0} événement(s), ${result.decisionsAdded ?? 0} action(s) ajouté(s)).`,
       });
       load();
     } catch (e) {
