@@ -26,9 +26,15 @@ const SECTION_TITLES = {
 const FICHE_TYPE_LABELS = {
   cyberattaque: 'Cyberattaque',
   ransomware: 'Ransomware',
+  ddos: 'Déni de service (DDoS)',
+  defacement: 'Défacement / réseaux sociaux',
   m365: 'Microsoft 365',
   fuite_donnees: 'Fuite de données',
+  rgpd: 'RGPD (violation de données)',
   panne_datacenter: 'Panne datacenter',
+  panne_electrique: 'Panne électrique',
+  sinistre_salle_serveur: 'Sinistre salle serveur',
+  cloud_saas: 'Cloud / SaaS',
   telephonie: 'Téléphonie',
   reseau: 'Réseau',
   ecoles: 'Écoles',
@@ -139,6 +145,14 @@ function renderEcolesTable(ecoles) {
   return `<table><tr><th>École</th><th>Adresse</th><th>Directeur/trice</th><th>Contact</th></tr>${rows}</table>`;
 }
 
+const ENCADRANT_CATEGORIE_ORDRE = ['Direction Générale', 'Directeur', 'Responsable de service', 'Responsable de secteur'];
+const ENCADRANT_CATEGORIE_LABEL = {
+  'Direction Générale': 'Direction Générale',
+  'Directeur': 'Directeurs',
+  'Responsable de service': 'Responsables de service',
+  'Responsable de secteur': 'Responsables de secteur',
+};
+
 async function buildTome3() {
   const parts = [];
 
@@ -150,9 +164,20 @@ async function buildTome3() {
     parts.push(`<p class="muted">Référentiel élus indisponible au moment de l'export (${escapeHtml(err.message)}).</p>`);
   }
 
-  parts.push('<h3>Contacts</h3>');
-  const contacts = await repo.listContacts();
-  parts.push(renderContactsTable(contacts));
+  parts.push('<h3>Encadrants (Hub DSI)</h3>');
+  const encadrants = await repo.listContacts(['hubdsi']);
+  const parCategorie = ENCADRANT_CATEGORIE_ORDRE.map((cat) => ({ cat, membres: encadrants.filter((e) => e.notes === cat) }))
+    .filter((g) => g.membres.length);
+  for (const { cat, membres } of parCategorie) {
+    parts.push(`<h4>${escapeHtml(ENCADRANT_CATEGORIE_LABEL[cat] || cat)} (${membres.length})</h4>`);
+    parts.push(renderEncadrantsTable(membres));
+  }
+
+  parts.push('<h3>Contacts DSI</h3>');
+  parts.push(renderContactsTable(await repo.listContacts(['manuel', 'studiorh'], 'dsi')));
+
+  parts.push('<h3>Autres contacts utiles</h3>');
+  parts.push(renderContactsTable(await repo.listContacts(['manuel', 'studiorh'], 'autre')));
 
   parts.push('<h3>Prestataires</h3>');
   const prestataires = await repo.listExternes('prestataire');
@@ -163,6 +188,17 @@ async function buildTome3() {
   parts.push(await renderExternesTable(organismes));
 
   return parts.join('\n');
+}
+
+function renderEncadrantsTable(membres) {
+  if (!membres.length) return '<p class="muted">Aucun.</p>';
+  const rows = membres.map((c) => `
+    <tr>
+      <td>${escapeHtml(c.nom)} ${escapeHtml(c.prenom || '')}</td>
+      <td>${escapeHtml(c.fonction || '')}</td>
+      <td>${escapeHtml(c.direction || '')}</td>
+    </tr>`).join('');
+  return `<table><tr><th>Nom</th><th>Poste</th><th>Unité</th></tr>${rows}</table>`;
 }
 
 function renderElusTable(elus) {
