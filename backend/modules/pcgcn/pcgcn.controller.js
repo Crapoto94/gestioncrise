@@ -65,7 +65,10 @@ async function getEcolesReferentiel(req, res, next) {
 
 // --- Tome 3 : annuaire ------------------------------------------------------
 async function listContacts(req, res, next) {
-  try { res.json(await repo.listContacts()); } catch (err) { next(err); }
+  try {
+    const sources = req.query.source ? String(req.query.source).split(',') : undefined;
+    res.json(await repo.listContacts(sources));
+  } catch (err) { next(err); }
 }
 async function createContact(req, res, next) {
   try { res.status(201).json(await repo.createContact(req.body, req.user.id)); } catch (err) { next(err); }
@@ -123,12 +126,24 @@ async function getEncadrantsReferentiel(req, res, next) {
   }
 }
 
+// Catégorie d'affichage des encadrants (Direction Générale / Directeur /
+// Responsable de service / Responsable de secteur) — stockée dans `notes`
+// pour les lignes source='hubdsi' (recalculée à chaque synchro, donc jamais
+// à éditer manuellement pour ces lignes-là) et utilisée pour grouper
+// l'annuaire côté frontend.
+function categorizeEncadrant(e) {
+  if (e.niveau === 'direction' && /GENERAL/i.test(e.poste || '')) return 'Direction Générale';
+  if (e.niveau === 'direction') return 'Directeur';
+  if (e.niveau === 'service') return 'Responsable de service';
+  return 'Responsable de secteur';
+}
+
 /**
  * Synchronise les contacts depuis l'organigramme Hub DSI (DGA/directeurs/
  * responsables de service et de secteur) : une ligne par poste pourvu
  * (source='hubdsi', agent_ref=code de l'unité), sans écraser les champs
- * spécifiques crise saisis localement (role_crise, notes...). Les postes
- * vacants ne créent pas de contact (rien à joindre).
+ * spécifiques crise saisis localement (role_crise). Les postes vacants ne
+ * créent pas de contact (rien à joindre).
  */
 async function syncContactsFromHubDsi(req, res, next) {
   try {
@@ -139,7 +154,7 @@ async function syncContactsFromHubDsi(req, res, next) {
       const agentRef = String(e.code);
       const existing = await repo.findContactByAgentRef('hubdsi', agentRef);
       const [nom, ...rest] = splitNomPrenom(e.responsable);
-      const fields = { nom, prenom: rest.join(' ') || undefined, fonction: e.poste, direction: e.chemin, notes: e.role };
+      const fields = { nom, prenom: rest.join(' ') || undefined, fonction: e.poste, direction: e.chemin, notes: categorizeEncadrant(e) };
       if (existing) {
         await repo.updateContact(existing.id, fields, req.user.id);
         updated += 1;

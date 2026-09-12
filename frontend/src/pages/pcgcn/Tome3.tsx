@@ -4,7 +4,7 @@ import { api } from '../../services/api';
 import { AttachmentsList } from '../../components/AttachmentsList';
 import type { PcgcnContact, PcgcnExterne } from '../../types';
 
-const SUBTABS = ['Élus', 'Contacts', 'Prestataires', 'Organismes'] as const;
+const SUBTABS = ['Élus', 'Encadrants', 'Contacts utiles', 'Prestataires', 'Organismes'] as const;
 type SubTab = typeof SUBTABS[number];
 
 export function Tome3({ canEdit }: { canEdit: boolean }) {
@@ -23,7 +23,8 @@ export function Tome3({ canEdit }: { canEdit: boolean }) {
         ))}
       </div>
       {tab === 'Élus' && <ElusTab />}
-      {tab === 'Contacts' && <ContactsTab canEdit={canEdit} />}
+      {tab === 'Encadrants' && <EncadrantsTab canEdit={canEdit} />}
+      {tab === 'Contacts utiles' && <ContactsUtilesTab canEdit={canEdit} />}
       {tab === 'Prestataires' && <ExternesTab category="prestataire" canEdit={canEdit} />}
       {tab === 'Organismes' && <ExternesTab category="organisme" canEdit={canEdit} />}
     </div>
@@ -62,13 +63,85 @@ function ElusTab() {
   );
 }
 
-function ContactsTab({ canEdit }: { canEdit: boolean }) {
+// Ordre d'affichage des encadrants — cf. catégorisation calculée côté
+// backend (syncContactsFromHubDsi) et stockée dans `notes` pour les lignes
+// source='hubdsi'.
+const CATEGORIE_ORDRE = ['Direction Générale', 'Directeur', 'Responsable de service', 'Responsable de secteur'];
+const CATEGORIE_LABEL: Record<string, string> = {
+  'Direction Générale': 'Direction Générale',
+  'Directeur': 'Directeurs',
+  'Responsable de service': 'Responsables de service',
+  'Responsable de secteur': 'Responsables de secteur',
+};
+
+function EncadrantsTab({ canEdit }: { canEdit: boolean }) {
+  const [encadrants, setEncadrants] = useState<PcgcnContact[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  function load() { api.get('/pcgcn/contacts', { params: { source: 'hubdsi' } }).then((r) => setEncadrants(r.data)); }
+  useEffect(load, []);
+
+  async function syncHubDsi() {
+    setSyncing(true); setSyncMsg(null);
+    try {
+      const { data } = await api.post('/pcgcn/contacts/sync-hubdsi');
+      setSyncMsg(`${data.created} créé(s), ${data.updated} mis à jour, ${data.skippedVacant} poste(s) vacant(s) ignoré(s) sur ${data.total} unités.`);
+      load();
+    } catch (e) {
+      setSyncMsg((e as Error).message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  const groupes = CATEGORIE_ORDRE.map((cat) => ({
+    categorie: cat,
+    membres: encadrants.filter((e) => e.notes === cat),
+  })).filter((g) => g.membres.length);
+  const autres = encadrants.filter((e) => !CATEGORIE_ORDRE.includes(e.notes || ''));
+
+  return (
+    <div className="space-y-4">
+      {canEdit && (
+        <button onClick={syncHubDsi} disabled={syncing} className="flex items-center gap-1 border text-sm px-3 py-2 rounded hover:bg-gray-50 disabled:opacity-60">
+          <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> Synchroniser encadrants (Hub DSI)
+        </button>
+      )}
+      {syncMsg && <p className="text-xs text-gray-500">{syncMsg}</p>}
+      <p className="text-xs text-gray-500">Organigramme Hub DSI (lecture seule, DGA/directions/services/secteurs) — les postes vacants ne sont pas affichés.</p>
+
+      {[...groupes, ...(autres.length ? [{ categorie: 'Autres', membres: autres }] : [])].map((g) => (
+        <div key={g.categorie} className="bg-white rounded-lg shadow-sm overflow-hidden">
+          <h3 className="font-medium text-sm px-3 pt-3">{CATEGORIE_LABEL[g.categorie] || g.categorie} <span className="text-gray-400 font-normal">({g.membres.length})</span></h3>
+          <table className="w-full text-sm mt-2">
+            <thead className="bg-gray-50 text-gray-500 text-left">
+              <tr><th className="p-2">Nom</th><th className="p-2">Poste</th><th className="p-2">Unité</th></tr>
+            </thead>
+            <tbody>
+              {g.membres.map((c) => (
+                <tr key={c.id} className="border-t">
+                  <td className="p-2">{c.nom} {c.prenom}</td>
+                  <td className="p-2 text-xs">{c.fonction}</td>
+                  <td className="p-2 text-xs text-gray-500">{c.direction}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      {encadrants.length === 0 && <p className="text-gray-400 text-sm">Aucun encadrant synchronisé — cliquez sur « Synchroniser encadrants ».</p>}
+    </div>
+  );
+}
+
+function ContactsUtilesTab({ canEdit }: { canEdit: boolean }) {
   const [contacts, setContacts] = useState<PcgcnContact[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
-  function load() { api.get('/pcgcn/contacts').then((r) => setContacts(r.data)); }
+  function load() { api.get('/pcgcn/contacts', { params: { source: 'manuel,studiorh' } }).then((r) => setContacts(r.data)); }
   useEffect(load, []);
 
   async function syncStudioRh() {
@@ -84,25 +157,14 @@ function ContactsTab({ canEdit }: { canEdit: boolean }) {
     }
   }
 
-  async function syncHubDsi() {
-    setSyncing(true); setSyncMsg(null);
-    try {
-      const { data } = await api.post('/pcgcn/contacts/sync-hubdsi');
-      setSyncMsg(`Hub DSI (organigramme) : ${data.created} créé(s), ${data.updated} mis à jour, ${data.skippedVacant} poste(s) vacant(s) ignoré(s) sur ${data.total} unités.`);
-      load();
-    } catch (e) {
-      setSyncMsg((e as Error).message);
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   async function createContact(fields: Partial<PcgcnContact>) {
     await api.post('/pcgcn/contacts', fields);
     setShowForm(false);
     load();
   }
-  async function updateField(id: number, patch: Partial<PcgcnContact>) {
+  // Le corps attendu par l'API est en camelCase (roleCrise, telephoneAstreinte...)
+  // — distinct du type PcgcnContact (snake_case, forme de la réponse GET).
+  async function updateField(id: number, patch: Record<string, string>) {
     await api.put(`/pcgcn/contacts/${id}`, patch);
     load();
   }
@@ -114,13 +176,11 @@ function ContactsTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-gray-500">Contacts pratiques pour la cellule de crise (équipe DSI, astreintes...) — saisie manuelle, complétable par synchronisation STUDIO RH.</p>
       {canEdit && (
         <div className="flex gap-2">
           <button onClick={() => setShowForm((v) => !v)} className="flex items-center gap-1 bg-ville text-white text-sm px-3 py-2 rounded hover:bg-ville-dark">
             <Plus size={16} /> Ajouter un contact
-          </button>
-          <button onClick={syncHubDsi} disabled={syncing} className="flex items-center gap-1 border text-sm px-3 py-2 rounded hover:bg-gray-50 disabled:opacity-60">
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> Synchroniser encadrants (Hub DSI)
           </button>
           <button onClick={syncStudioRh} disabled={syncing} className="flex items-center gap-1 border text-sm px-3 py-2 rounded hover:bg-gray-50 disabled:opacity-60">
             <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> Synchroniser STUDIO RH
@@ -133,7 +193,7 @@ function ContactsTab({ canEdit }: { canEdit: boolean }) {
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-left">
-            <tr><th className="p-2">Nom</th><th className="p-2">Fonction</th><th className="p-2">Rôle de crise</th><th className="p-2">Téléphone</th><th className="p-2">Email</th><th className="p-2"></th></tr>
+            <tr><th className="p-2">Nom</th><th className="p-2">Fonction</th><th className="p-2">Rôle de crise</th><th className="p-2">Téléphone</th><th className="p-2 bg-amber-50">Astreinte</th><th className="p-2">Email</th><th className="p-2"></th></tr>
           </thead>
           <tbody>
             {contacts.map((c) => (
@@ -145,16 +205,25 @@ function ContactsTab({ canEdit }: { canEdit: boolean }) {
                     <input
                       className="border rounded px-1 py-0.5 text-xs w-full"
                       defaultValue={c.role_crise || ''}
-                      onBlur={(e) => e.target.value !== (c.role_crise || '') && updateField(c.id, { role_crise: e.target.value })}
+                      onBlur={(e) => e.target.value !== (c.role_crise || '') && updateField(c.id, { roleCrise: e.target.value })}
                     />
                   ) : c.role_crise}
                 </td>
-                <td className="p-2 text-xs">{c.telephone_pro}{c.telephone_astreinte ? ` / astreinte: ${c.telephone_astreinte}` : ''}</td>
+                <td className="p-2 text-xs">{c.telephone_pro}</td>
+                <td className="p-2 text-xs bg-amber-50/50">
+                  {canEdit ? (
+                    <input
+                      className="border rounded px-1 py-0.5 text-xs w-full"
+                      defaultValue={c.telephone_astreinte || ''}
+                      onBlur={(e) => e.target.value !== (c.telephone_astreinte || '') && updateField(c.id, { telephoneAstreinte: e.target.value })}
+                    />
+                  ) : c.telephone_astreinte}
+                </td>
                 <td className="p-2 text-xs">{c.email}</td>
                 <td className="p-2">{canEdit && <button onClick={() => remove(c.id)} className="text-red-500 hover:text-red-700"><Trash2 size={14} /></button>}</td>
               </tr>
             ))}
-            {contacts.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-gray-400">Aucun contact.</td></tr>}
+            {contacts.length === 0 && <tr><td colSpan={7} className="p-4 text-center text-gray-400">Aucun contact.</td></tr>}
           </tbody>
         </table>
       </div>

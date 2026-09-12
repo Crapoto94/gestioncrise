@@ -35,7 +35,9 @@ const updateFiche = (id, f, userId) => {
 const removeFiche = (id) => db.run('DELETE FROM pgc.pcgcn_fiches WHERE id = $1', [id]);
 
 // --- Tome 3 : annuaire -------------------------------------------------------
-const listContacts = () => db.all('SELECT * FROM pgc.pcgcn_contacts ORDER BY nom, prenom');
+const listContacts = (sources) => sources?.length
+  ? db.all('SELECT * FROM pgc.pcgcn_contacts WHERE source = ANY($1) ORDER BY nom, prenom', [sources])
+  : db.all('SELECT * FROM pgc.pcgcn_contacts ORDER BY nom, prenom');
 const createContact = (c, userId) =>
   db.get(
     `INSERT INTO pgc.pcgcn_contacts
