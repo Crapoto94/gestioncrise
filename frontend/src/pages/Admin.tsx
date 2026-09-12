@@ -5,7 +5,7 @@ interface IntegrationStatus { ok: boolean; detail?: string }
 interface StatusResponse {
   database: IntegrationStatus;
   apm: IntegrationStatus; hubdsi: IntegrationStatus; studioRh: IntegrationStatus;
-  analyseMail: IntegrationStatus; apirs: IntegrationStatus; ia: IntegrationStatus;
+  analyseMail: IntegrationStatus; apirs: IntegrationStatus; ia: IntegrationStatus; graph: IntegrationStatus;
 }
 interface AppUser {
   id: number; username: string; display_name: string; is_local: boolean; active: boolean; roles: string[];
@@ -19,6 +19,7 @@ const INTEGRATIONS: { key: keyof StatusResponse; label: string }[] = [
   { key: 'analyseMail', label: 'Analyse Mail (alertes, IOC)' },
   { key: 'apirs', label: 'APIRS (infrastructure)' },
   { key: 'ia', label: 'IA Locale' },
+  { key: 'graph', label: 'Microsoft Graph (Teams, M365)' },
 ];
 
 const ALL_ROLES = ['DSI', 'RSSI', 'IRS', 'SSD', 'BDP', 'DGS', 'DIRECTION', 'ELU', 'DPO'];

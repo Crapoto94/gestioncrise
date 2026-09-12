@@ -6,6 +6,26 @@ conventions de [`GUIDE_NOUVELLE_APP_VILLE.md`](./GUIDE_NOUVELLE_APP_VILLE.md)
 et aux specs [`00_VISION_PRODUIT.md`](./00_VISION_PRODUIT.md) à
 [`08_SECURITE_AUDIT_EXPORTS.md`](./08_SECURITE_AUDIT_EXPORTS.md).
 
+## Microsoft Graph (Teams, M365)
+
+`backend/services/graph.js` — authentification app-only (client_credentials,
+aucun utilisateur) via une App Registration Azure AD dédiée. Procédure :
+
+1. portal.azure.com → **Azure Active Directory** → **App registrations** →
+   **New registration** (single-tenant, pas de redirect URI).
+2. Noter **Application (client) ID** et **Directory (tenant) ID**.
+3. **Certificates & secrets** → **New client secret** → copier la valeur
+   immédiatement (affichée une seule fois).
+4. **API permissions** → **Microsoft Graph** → **Application permissions**
+   (pas Delegated) → `Team.ReadBasic.All`, `Channel.ReadBasic.All`,
+   `ChannelMessage.Read.All` au minimum, puis **Grant admin consent**.
+5. Renseigner `GRAPH_TENANT_ID` / `GRAPH_CLIENT_ID` / `GRAPH_CLIENT_SECRET`
+   dans `.env` (voir `.env.example`).
+
+Étendre à d'autres besoins M365 plus tard = ajouter les scopes côté Azure AD
+(+ ré-consentement) et les fonctions correspondantes dans `graph.js`, sans
+changer cette structure.
+
 ## PCGCN — Plan Communal de Gestion de Crise Numérique
 
 Menu dédié (`/pcgcn`), en 3 tomes :

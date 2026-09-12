@@ -24,6 +24,7 @@ const studioRh = require('./services/studioRh');
 const analyseMail = require('./services/analyseMail');
 const apirs = require('./services/apirs');
 const ia = require('./services/ia');
+const graph = require('./services/graph');
 
 const app = express();
 
@@ -44,15 +45,18 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *     tags: [Status]
  */
 app.get('/api/status', async (req, res) => {
-  const [db, apmStatus, hubdsiStatus, studioRhStatus, analyseMailStatus, apirsStatus, iaStatus] = await Promise.all([
+  const [db, apmStatus, hubdsiStatus, studioRhStatus, analyseMailStatus, apirsStatus, iaStatus, graphStatus] = await Promise.all([
     pool.query('SELECT 1').then(() => ({ ok: true })).catch((err) => ({ ok: false, detail: err.message })),
-    apm.ping(), hubdsi.ping(), studioRh.ping(), analyseMail.ping(), apirs.ping(), ia.ping(),
+    apm.ping(), hubdsi.ping(), studioRh.ping(), analyseMail.ping(), apirs.ping(), ia.ping(), graph.ping(),
   ]);
   const allOk = [db, apmStatus].every((s) => s.ok); // la DB et l'APM sont critiques ; les autres sont optionnelles
   res.status(allOk ? 200 : 200).json({
     status: allOk ? 'ok' : 'degraded',
     database: db,
-    integrations: { apm: apmStatus, hubdsi: hubdsiStatus, studioRh: studioRhStatus, analyseMail: analyseMailStatus, apirs: apirsStatus, ia: iaStatus },
+    integrations: {
+      apm: apmStatus, hubdsi: hubdsiStatus, studioRh: studioRhStatus, analyseMail: analyseMailStatus,
+      apirs: apirsStatus, ia: iaStatus, graph: graphStatus,
+    },
     timestamp: new Date().toISOString(),
   });
 });
