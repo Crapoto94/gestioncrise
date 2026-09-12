@@ -26,6 +26,22 @@ aucun utilisateur) via une App Registration Azure AD dédiée. Procédure :
 (+ ré-consentement) et les fonctions correspondantes dans `graph.js`, sans
 changer cette structure.
 
+### Canal Teams de crise → import + analyse IA
+
+`GRAPH_CRISIS_TEAM_ID` / `GRAPH_CRISIS_CHANNEL_ID` (dans `.env`) désignent le
+canal Teams où se déroulent les crises réelles. Sur une fiche crise, l'onglet
+**Teams & IA** permet de :
+1. Rechercher un fil dans ce canal (mots-clés sur le sujet) et l'importer —
+   message racine + toutes les réponses, mis en forme en transcript texte
+   (`pgc.crises.teams_transcript`).
+2. Lancer une **analyse IA** (IA Locale — contrat confirmé `POST /api/v1/ai/query`
+   sur l'APM, cf. `backend/services/ia.js`) : résumé, chronologie, cause
+   racine, ce qui a fonctionné/posé problème, niveau de gravité estimé.
+   Traitement asynchrone (jobId + poll), une génération peut prendre 1-2 min.
+3. Le **prompt** utilisé est éditable dans **Admin → Analyse IA des crises**
+   (persisté dans `pgc.app_settings`, clé `crisis_ia_prompt`), avec les
+   placeholders `{TITRE}` `{TYPE}` `{SEVERITE}` `{TRANSCRIPTION}`.
+
 ## PCGCN — Plan Communal de Gestion de Crise Numérique
 
 Menu dédié (`/pcgcn`), en 3 tomes :

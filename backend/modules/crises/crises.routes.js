@@ -19,9 +19,14 @@ router.use(requireAuth);
 router.get('/', controller.list);
 router.post('/', auditLog('crises'), controller.create);
 router.get('/families', controller.listFamilies);
+router.get('/teams/search', controller.searchTeamsThreads);
 router.get('/:id', controller.getOne);
 router.put('/:id', auditLog('crises'), controller.update);
 router.post('/:id/transition', auditLog('crises'), controller.transition);
+
+router.post('/:id/teams/import', auditLog('crises'), controller.importTeamsThread);
+router.post('/:id/analyze', controller.startAnalysis);
+router.get('/:id/analyze/status/:jobId', controller.getAnalysisStatus);
 
 router.get('/:id/events', controller.listEvents);
 router.post('/:id/events', auditLog('crisis_events'), controller.addEvent);

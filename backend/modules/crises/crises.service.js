@@ -3,6 +3,7 @@
 // On autorise l'avancement au statut suivant, ou un retour arrière explicite
 // (ex. ré-ouverture), mais pas un saut qui contournerait la qualification.
 const repo = require('./crises.repository');
+const graph = require('../../services/graph');
 const { HttpError } = require('../../middlewares/errorHandler');
 
 // Deux familles distinctes — toute crise informatique n'est pas une crise
@@ -33,12 +34,37 @@ function assertValidType(type) {
 
 async function createCrisis(data, actorId) {
   assertValidType(data.type);
-  const crisis = await repo.create({ ...data, createdBy: actorId });
+  let crisis = await repo.create({ ...data, createdBy: actorId });
   await repo.addEvent(crisis.id, {
     content: `Crise ouverte: ${crisis.title}`,
     eventType: 'changement_statut',
     createdBy: actorId,
   });
+
+  // Association optionnelle d'un fil Teams dès la création (sélectionné
+  // dynamiquement dans le canal de crise configuré) — évite un aller-retour
+  // supplémentaire dans l'onglet Teams & IA.
+  if (data.teamsThreadId) {
+    try {
+      const result = await graph.importCrisisThread(data.teamsThreadId);
+      crisis = await repo.saveTeamsImport(crisis.id, {
+        teamId: result.teamId, channelId: result.channelId, threadId: result.threadId, transcript: result.transcript,
+      });
+      await repo.addEvent(crisis.id, {
+        content: `Discussion Teams associée ("${result.sujet || data.teamsThreadId}")`,
+        eventType: 'info',
+        createdBy: actorId,
+      });
+    } catch (err) {
+      // On ne bloque jamais la création de la crise pour un souci Teams —
+      // l'import pourra être retenté depuis l'onglet Teams & IA.
+      await repo.addEvent(crisis.id, {
+        content: `Échec de l'association Teams automatique: ${err.message}`,
+        eventType: 'info',
+        createdBy: actorId,
+      });
+    }
+  }
   return crisis;
 }
 

@@ -1,6 +1,56 @@
 const repo = require('./crises.repository');
 const service = require('./crises.service');
+const graph = require('../../services/graph');
+const ia = require('../../services/ia');
+const settingsRepo = require('../admin/settings.repository');
 const { HttpError } = require('../../middlewares/errorHandler');
+
+// Filet de secours si `pgc.app_settings.crisis_ia_prompt` est absent (ne
+// devrait pas arriver en pratique, seedé par les migrations 006/007) — on
+// demande quand même le bloc JSON pour que le comportement reste cohérent.
+const DEFAULT_IA_PROMPT = `Analyse cette discussion Teams documentant une crise informatique.
+
+CRISE : {TITRE}
+TYPE : {TYPE}
+SÉVÉRITÉ DÉCLARÉE : {SEVERITE}
+
+DISCUSSION TEAMS :
+{TRANSCRIPTION}
+
+Produis une synthèse structurée en Markdown (résumé, cause racine, ce qui a bien fonctionné, axes d'amélioration, niveau de gravité estimé), puis un unique bloc \`\`\`json avec les clés "chronologie" (tableau de {date, contenu}) et "actions" (tableau de {quoi, qui, terme: "court_terme"|"moyen_long_terme"}).`;
+
+const VALID_HORIZONS = ['court_terme', 'moyen_long_terme'];
+
+/**
+ * Extrait le bloc ```json ... ``` de la réponse IA (s'il existe) et le
+ * parse. Retourne { synthese, chronologie, actions } — synthese est le texte
+ * markdown avant le bloc JSON (ou la réponse complète si aucun bloc trouvé /
+ * JSON invalide, pour ne jamais perdre l'analyse).
+ */
+function parseAnalysisResponse(raw) {
+  const match = raw.match(/```json\s*([\s\S]*?)```/i);
+  if (!match) return { synthese: raw.trim(), chronologie: [], actions: [] };
+  // Le modèle fait précéder le bloc JSON d'un titre ("### PARTIE 2 — Bloc
+  // JSON structuré" ou variante) qui ne doit pas polluer la synthèse.
+  let synthese = raw.slice(0, match.index).trim();
+  synthese = synthese.replace(/\n{0,2}#{1,6}[^\n]*partie\s*2[^\n]*$/i, '').trim();
+  synthese = synthese.replace(/\n{0,2}(\*{3}|-{3})\s*$/, '').trim();
+  synthese = synthese || raw.trim();
+  try {
+    const parsed = JSON.parse(match[1]);
+    const chronologie = Array.isArray(parsed.chronologie) ? parsed.chronologie : [];
+    const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
+    return { synthese, chronologie, actions };
+  } catch {
+    return { synthese, chronologie: [], actions: [] };
+  }
+}
+
+// Jobs d'analyse IA asynchrones (même principe que appdsi/transcriptmanager :
+// réponse HTTP immédiate avec un jobId, traitement en arrière-plan, le front
+// poll GET /:id/analyze/status/:jobId — une génération IA peut prendre
+// plusieurs minutes, on ne bloque jamais une requête HTTP aussi longtemps).
+const analyzeJobs = {};
 
 async function list(req, res, next) {
   try {
@@ -82,8 +132,123 @@ async function removeMember(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// --- Import Teams -----------------------------------------------------
+/** Recherche des fils dans le canal Teams de crise configuré, pour le sélecteur d'import. */
+async function searchTeamsThreads(req, res, next) {
+  try {
+    res.json(await graph.searchCrisisChannelThreads(req.query.q));
+  } catch (err) {
+    next(new HttpError(err.upstreamUnreachable ? 503 : 502, `Recherche Teams indisponible: ${err.message}`));
+  }
+}
+
+/** Importe le fil choisi (message racine + réponses) comme transcript de la crise. */
+async function importTeamsThread(req, res, next) {
+  try {
+    const { threadId } = req.body;
+    if (!threadId) throw new HttpError(400, 'threadId requis');
+    const result = await graph.importCrisisThread(threadId);
+    const crisis = await repo.saveTeamsImport(Number(req.params.id), {
+      teamId: result.teamId, channelId: result.channelId, threadId: result.threadId, transcript: result.transcript,
+    });
+    await repo.addEvent(Number(req.params.id), {
+      content: `Discussion Teams importée ("${result.sujet || threadId}")`,
+      eventType: 'info',
+      createdBy: req.user.id,
+    });
+    res.json(crisis);
+  } catch (err) {
+    if (err instanceof HttpError) return next(err);
+    next(new HttpError(err.upstreamUnreachable ? 503 : 502, `Import Teams indisponible: ${err.message}`));
+  }
+}
+
+// --- Analyse IA ---------------------------------------------------------
+/** Démarre l'analyse IA (asynchrone) du transcript Teams importé pour cette crise. */
+async function startAnalysis(req, res, next) {
+  try {
+    const crisis = await repo.findById(Number(req.params.id));
+    if (!crisis) throw new HttpError(404, 'Crise introuvable');
+    if (!crisis.teams_transcript) throw new HttpError(400, "Aucune discussion Teams importée pour cette crise — importez-la d'abord.");
+
+    const jobId = `ia_${Date.now()}_${crisis.id}`;
+    analyzeJobs[jobId] = { status: 'starting', progress: 0, crisisId: crisis.id, createdAt: Date.now() };
+    res.json({ jobId });
+
+    (async () => {
+      const job = analyzeJobs[jobId];
+      try {
+        job.status = 'préparation du prompt';
+        job.progress = 10;
+        const promptRow = await settingsRepo.get('crisis_ia_prompt');
+        const template = promptRow?.setting_value || DEFAULT_IA_PROMPT;
+        const prompt = template
+          .replace('{TITRE}', crisis.title)
+          .replace('{TYPE}', crisis.type)
+          .replace('{SEVERITE}', crisis.severity)
+          .replace('{TRANSCRIPTION}', crisis.teams_transcript);
+
+        job.status = "envoi à l'IA Locale";
+        job.progress = 40;
+        const model = req.body?.model || undefined;
+        const raw = await ia.queryAi(prompt, model);
+        const { synthese, chronologie, actions } = parseAnalysisResponse(raw);
+
+        job.status = 'enregistrement de la synthèse';
+        job.progress = 70;
+        await repo.saveIaAnalysis(crisis.id, { analysis: synthese, model });
+
+        // Nourrit la main courante et les décisions à partir du bloc JSON —
+        // on retire d'abord les entrées de la précédente analyse IA pour ne
+        // jamais dupliquer d'une ré-analyse à l'autre (les entrées saisies
+        // manuellement, source='manuel', ne sont jamais touchées).
+        job.status = 'mise à jour de la main courante et des décisions';
+        job.progress = 85;
+        await repo.removeEventsBySource(crisis.id, 'ia');
+        await repo.removeDecisionsBySource(crisis.id, 'ia');
+        for (const item of chronologie) {
+          if (!item?.contenu) continue;
+          const validDate = item.date && !Number.isNaN(Date.parse(item.date)) ? item.date : null;
+          const datePrefix = item.date ? `[${item.date}] ` : '';
+          await repo.addEvent(crisis.id, {
+            content: `${datePrefix}${item.contenu}`,
+            eventType: 'analyse_ia',
+            source: 'ia',
+            createdAt: validDate,
+          });
+        }
+        for (const item of actions) {
+          if (!item?.quoi) continue;
+          await repo.addDecision(crisis.id, {
+            title: item.quoi,
+            ownerLabel: item.qui || null,
+            horizon: VALID_HORIZONS.includes(item.terme) ? item.terme : 'court_terme',
+            source: 'ia',
+          });
+        }
+
+        job.status = 'completed';
+        job.progress = 100;
+        job.analysis = synthese;
+        job.eventsAdded = chronologie.length;
+        job.decisionsAdded = actions.length;
+      } catch (err) {
+        job.status = 'error';
+        job.error = err.message;
+      }
+    })();
+  } catch (err) { next(err); }
+}
+
+function getAnalysisStatus(req, res) {
+  const job = analyzeJobs[req.params.jobId];
+  if (!job) return res.status(404).json({ status: 'error', message: 'Job non trouvé' });
+  res.json(job);
+}
+
 module.exports = {
   list, getOne, create, update, transition, listFamilies,
   listEvents, addEvent, listDecisions, addDecision, updateDecision,
   listMembers, addMember, removeMember,
+  searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus,
 };

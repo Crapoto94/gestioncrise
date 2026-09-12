@@ -14,3 +14,4 @@ pgdata/
 .claude/settings.local.json
 *.tsbuildinfo
 backend/orgchart_sample.json
+backend/scripts/crise-channel-export.json

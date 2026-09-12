@@ -3,11 +3,11 @@ const { db } = require('../../pg_db');
 const listByCrisis = (crisisId) =>
   db.all('SELECT * FROM pgc.crisis_communications WHERE crisis_id = $1 ORDER BY created_at DESC', [crisisId]);
 
-const create = ({ crisisId, channel, recipients, subject, content }) =>
+const create = ({ crisisId, channel, recipients, subject, content, direction }) =>
   db.get(
-    `INSERT INTO pgc.crisis_communications (crisis_id, channel, recipients, subject, content, status)
-     VALUES ($1, $2, $3, $4, $5, 'brouillon') RETURNING *`,
-    [crisisId, channel, recipients, subject || null, content]
+    `INSERT INTO pgc.crisis_communications (crisis_id, channel, recipients, subject, content, status, direction)
+     VALUES ($1, $2, $3, $4, $5, 'brouillon', $6) RETURNING *`,
+    [crisisId, channel, recipients, subject || null, content, direction || 'interne']
   );
 
 const markSent = (id) =>

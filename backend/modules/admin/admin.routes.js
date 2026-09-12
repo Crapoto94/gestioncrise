@@ -7,5 +7,8 @@ const router = express.Router();
 router.use(requireAuth, requireRole('DSI', 'RSSI'));
 
 router.get('/integrations-status', controller.integrationsStatus);
+router.get('/settings/:key', controller.getSetting);
+router.put('/settings/:key', controller.setSetting);
+router.get('/ia-models', controller.listIaModels);
 
 module.exports = router;

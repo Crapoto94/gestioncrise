@@ -9,11 +9,14 @@ async function list(req, res, next) {
 /** Crée un brouillon (pas d'envoi tant que /send n'est pas appelé explicitement). */
 async function draft(req, res, next) {
   try {
-    const { channel, recipients, subject, content } = req.body;
+    const { channel, recipients, subject, content, direction } = req.body;
     if (!['mail', 'sms', 'interne'].includes(channel)) {
       throw new HttpError(400, 'channel doit être mail, sms ou interne');
     }
-    const comm = await repo.create({ crisisId: Number(req.params.id), channel, recipients, subject, content });
+    if (direction && !['interne', 'externe'].includes(direction)) {
+      throw new HttpError(400, 'direction doit être interne ou externe');
+    }
+    const comm = await repo.create({ crisisId: Number(req.params.id), channel, recipients, subject, content, direction });
     res.status(201).json(comm);
   } catch (err) { next(err); }
 }

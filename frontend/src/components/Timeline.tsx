@@ -11,6 +11,7 @@ export function Timeline({ events }: { events: CrisisEvent[] }) {
           <time className="text-xs text-gray-400">{new Date(e.created_at).toLocaleString('fr-FR')}</time>
           <p className="text-sm">
             <span className="text-[10px] uppercase tracking-wide text-gray-400 mr-1">{e.event_type}</span>
+            {e.source === 'ia' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 mr-1">IA</span>}
             {e.content}
           </p>
         </li>

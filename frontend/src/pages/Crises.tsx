@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus, Search, MessagesSquare, X } from 'lucide-react';
 import { api } from '../services/api';
 import { SeverityBadge, StatusBadge } from '../components/StatusBadge';
-import type { Crisis, CrisisType, Severity } from '../types';
+import type { Crisis, CrisisType, Severity, TeamsThreadResult } from '../types';
 
 // Taxonomie unifiée avec les fiches réflexes du PCGCN (Tome 2) — deux
 // familles distinctes : toute crise informatique n'est pas une crise cyber.
@@ -41,7 +41,7 @@ export function Crises() {
   useEffect(load, []);
   useEffect(() => { api.get('/crises/families').then((r) => setFamilies(r.data)).catch(() => {}); }, []);
 
-  async function createCrisis(form: { title: string; type: CrisisType; severity: Severity; description: string }) {
+  async function createCrisis(form: { title: string; type: CrisisType; severity: Severity; description: string; teamsThreadId: string | null }) {
     try {
       await api.post('/crises', form);
       setShowForm(false);
@@ -97,7 +97,7 @@ export function Crises() {
 
 function NewCrisisForm({ families, onSubmit, onCancel }: {
   families: Record<string, Family>;
-  onSubmit: (f: { title: string; type: CrisisType; severity: Severity; description: string }) => void;
+  onSubmit: (f: { title: string; type: CrisisType; severity: Severity; description: string; teamsThreadId: string | null }) => void;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState('');
@@ -106,9 +106,27 @@ function NewCrisisForm({ families, onSubmit, onCancel }: {
   const [description, setDescription] = useState('');
   const hasFamilies = Object.keys(families).length > 0;
 
+  const [teamsThread, setTeamsThread] = useState<TeamsThreadResult | null>(null);
+  const [teamsQuery, setTeamsQuery] = useState('');
+  const [teamsResults, setTeamsResults] = useState<TeamsThreadResult[]>([]);
+  const [teamsSearching, setTeamsSearching] = useState(false);
+  const [teamsError, setTeamsError] = useState<string | null>(null);
+
+  async function searchTeams() {
+    setTeamsSearching(true); setTeamsError(null);
+    try {
+      const r = await api.get('/crises/teams/search', { params: { q: teamsQuery } });
+      setTeamsResults(r.data);
+    } catch (e) {
+      setTeamsError((e as Error).message);
+    } finally {
+      setTeamsSearching(false);
+    }
+  }
+
   return (
     <form
-      onSubmit={(e) => { e.preventDefault(); onSubmit({ title, type, severity, description }); }}
+      onSubmit={(e) => { e.preventDefault(); onSubmit({ title, type, severity, description, teamsThreadId: teamsThread?.id || null }); }}
       className="bg-white rounded-lg shadow-sm p-4 grid grid-cols-2 gap-4"
     >
       <div className="col-span-2">
@@ -139,6 +157,48 @@ function NewCrisisForm({ families, onSubmit, onCancel }: {
         <label className="block text-sm text-gray-600 mb-1">Description</label>
         <textarea className="w-full border rounded px-3 py-2 text-sm" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
+
+      <div className="col-span-2 border-t pt-3">
+        <label className="flex items-center gap-1 text-sm text-gray-600 mb-2"><MessagesSquare size={15} /> Fil Teams associé (optionnel)</label>
+        {teamsThread ? (
+          <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+            <span>
+              <span className="font-medium">{teamsThread.sujet}</span>
+              {teamsThread.auteur && <> — <span className="text-gray-500">{teamsThread.auteur}</span></>}
+              <span className="text-gray-400"> ({new Date(teamsThread.date).toLocaleString('fr-FR')})</span>
+            </span>
+            <button type="button" onClick={() => setTeamsThread(null)} className="text-gray-400 hover:text-gray-700"><X size={16} /></button>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 border rounded px-3 py-2 text-sm"
+                placeholder="Rechercher un fil dans le canal Teams de crise (mots-clés du sujet)…"
+                value={teamsQuery}
+                onChange={(e) => setTeamsQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); searchTeams(); } }}
+              />
+              <button type="button" onClick={searchTeams} disabled={teamsSearching} className="px-3 py-2 text-sm rounded border hover:bg-gray-50 flex items-center gap-1">
+                <Search size={14} /> {teamsSearching ? 'Recherche…' : 'Rechercher'}
+              </button>
+            </div>
+            {teamsError && <p className="text-xs text-red-600 mt-1">{teamsError}</p>}
+            {teamsResults.length > 0 && (
+              <ul className="mt-2 border rounded divide-y max-h-48 overflow-y-auto">
+                {teamsResults.map((t) => (
+                  <li key={t.id} className="p-2 text-sm hover:bg-gray-50 cursor-pointer" onClick={() => { setTeamsThread(t); setTeamsResults([]); }}>
+                    <span className="font-medium">{t.sujet}</span>
+                    {t.auteur && <> — <span className="text-gray-500">{t.auteur}</span></>}
+                    <span className="text-gray-400"> ({new Date(t.date).toLocaleString('fr-FR')})</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+
       <div className="col-span-2 flex justify-end gap-2">
         <button type="button" onClick={onCancel} className="px-3 py-2 text-sm rounded border">Annuler</button>
         <button type="submit" className="px-3 py-2 text-sm rounded bg-ville text-white hover:bg-ville-dark">Créer</button>

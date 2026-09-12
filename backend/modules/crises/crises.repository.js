@@ -21,7 +21,7 @@ const create = ({ title, type, severity, description, createdBy }) =>
   );
 
 const update = (id, fields) => {
-  const allowed = ['title', 'type', 'severity', 'description'];
+  const allowed = ['title', 'type', 'severity', 'description', 'opened_at', 'closed_at', 'incident_kind', 'services_impactes', 'notes'];
   const sets = [];
   const params = [];
   for (const key of allowed) {
@@ -38,6 +38,21 @@ const update = (id, fields) => {
   );
 };
 
+const saveTeamsImport = (id, { teamId, channelId, threadId, transcript }) =>
+  db.get(
+    `UPDATE pgc.crises SET teams_team_id = $1, teams_channel_id = $2, teams_thread_id = $3,
+       teams_transcript = $4, teams_imported_at = now(), updated_at = now()
+     WHERE id = $5 RETURNING *`,
+    [teamId, channelId, threadId, transcript, id]
+  );
+
+const saveIaAnalysis = (id, { analysis, model }) =>
+  db.get(
+    `UPDATE pgc.crises SET ia_analysis = $1, ia_analysis_model = $2, ia_analysis_generated_at = now(), updated_at = now()
+     WHERE id = $3 RETURNING *`,
+    [analysis, model || null, id]
+  );
+
 const setStatus = (id, status) => {
   const closedAtClause = status === 'cloturee' ? ', closed_at = now()' : '';
   return db.get(
@@ -47,31 +62,50 @@ const setStatus = (id, status) => {
 };
 
 // --- Main courante -----------------------------------------------------
-const addEvent = (crisisId, { content, eventType, createdBy }) =>
+// `createdAt` optionnel : permet à l'analyse IA de dater ses entrées de
+// chronologie à l'heure réelle de l'événement (extraite du transcript)
+// plutôt qu'à l'heure d'insertion, pour que la main courante reste triée
+// dans le bon ordre chronologique.
+const addEvent = (crisisId, { content, eventType, createdBy, source, createdAt }) =>
   db.get(
-    `INSERT INTO pgc.crisis_events (crisis_id, content, event_type, created_by)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [crisisId, content, eventType || 'info', createdBy || null]
+    `INSERT INTO pgc.crisis_events (crisis_id, content, event_type, created_by, source, created_at)
+     VALUES ($1, $2, $3, $4, $5, COALESCE($6, now())) RETURNING *`,
+    [crisisId, content, eventType || 'info', createdBy || null, source || 'manuel', createdAt || null]
   );
 
 const listEvents = (crisisId) =>
   db.all('SELECT * FROM pgc.crisis_events WHERE crisis_id = $1 ORDER BY created_at ASC', [crisisId]);
 
+// Retire les entrées d'une source donnée (ex. 'ia') avant de réinsérer le
+// résultat d'une nouvelle analyse, pour ne jamais dupliquer d'une exécution
+// à l'autre.
+const removeEventsBySource = (crisisId, source) =>
+  db.run('DELETE FROM pgc.crisis_events WHERE crisis_id = $1 AND source = $2', [crisisId, source]);
+
 // --- Décisions -----------------------------------------------------------
-const addDecision = (crisisId, { title, description, ownerId, dueAt, createdBy }) =>
+const addDecision = (crisisId, { title, description, ownerId, ownerLabel, horizon, dueAt, createdBy, source }) =>
   db.get(
-    `INSERT INTO pgc.crisis_decisions (crisis_id, title, description, owner_id, due_at, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [crisisId, title, description || null, ownerId || null, dueAt || null, createdBy || null]
+    `INSERT INTO pgc.crisis_decisions (crisis_id, title, description, owner_id, owner_label, horizon, due_at, created_by, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    [crisisId, title, description || null, ownerId || null, ownerLabel || null, horizon || 'court_terme', dueAt || null, createdBy || null, source || 'manuel']
   );
 
 const listDecisions = (crisisId) =>
-  db.all('SELECT * FROM pgc.crisis_decisions WHERE crisis_id = $1 ORDER BY created_at ASC', [crisisId]);
+  db.all(
+    `SELECT d.*, u.display_name AS owner_display_name, u.username AS owner_username
+     FROM pgc.crisis_decisions d
+     LEFT JOIN pgc.users u ON u.id = d.owner_id
+     WHERE d.crisis_id = $1 ORDER BY d.created_at ASC`,
+    [crisisId]
+  );
 
-const updateDecision = (id, { status, title, description, ownerId, dueAt }) => {
+const removeDecisionsBySource = (crisisId, source) =>
+  db.run('DELETE FROM pgc.crisis_decisions WHERE crisis_id = $1 AND source = $2', [crisisId, source]);
+
+const updateDecision = (id, { status, title, description, ownerId, ownerLabel, horizon, dueAt }) => {
   const sets = [];
   const params = [];
-  const map = { status, title, description, owner_id: ownerId, due_at: dueAt };
+  const map = { status, title, description, owner_id: ownerId, owner_label: ownerLabel, horizon, due_at: dueAt };
   for (const [col, val] of Object.entries(map)) {
     if (val !== undefined) { params.push(val); sets.push(`${col} = $${params.length}`); }
   }
@@ -103,6 +137,7 @@ const removeMember = (crisisId, userId) =>
 
 module.exports = {
   WORKFLOW_ORDER, list, findById, create, update, setStatus,
-  addEvent, listEvents, addDecision, listDecisions, updateDecision,
-  addMember, listMembers, removeMember,
+  addEvent, listEvents, removeEventsBySource,
+  addDecision, listDecisions, removeDecisionsBySource, updateDecision,
+  addMember, listMembers, removeMember, saveTeamsImport, saveIaAnalysis,
 };

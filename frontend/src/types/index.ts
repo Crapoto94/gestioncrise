@@ -26,6 +26,22 @@ export interface Crisis {
   description: string | null;
   opened_at: string;
   closed_at: string | null;
+  teams_thread_id?: string | null;
+  teams_transcript?: string | null;
+  teams_imported_at?: string | null;
+  ia_analysis?: string | null;
+  ia_analysis_model?: string | null;
+  ia_analysis_generated_at?: string | null;
+  incident_kind?: 'interruption' | 'degradation' | null;
+  services_impactes?: string | null;
+  notes?: string | null;
+}
+
+export interface TeamsThreadResult {
+  id: string;
+  date: string;
+  auteur: string | null;
+  sujet: string;
 }
 
 export interface CrisisEvent {
@@ -34,6 +50,7 @@ export interface CrisisEvent {
   content: string;
   event_type: string;
   created_at: string;
+  source?: 'manuel' | 'ia';
 }
 
 export interface CrisisDecision {
@@ -43,6 +60,11 @@ export interface CrisisDecision {
   description: string | null;
   status: 'a_faire' | 'en_cours' | 'fait' | 'abandonnee';
   due_at: string | null;
+  owner_label?: string | null;
+  owner_display_name?: string | null;
+  owner_username?: string | null;
+  horizon?: 'court_terme' | 'moyen_long_terme';
+  source?: 'manuel' | 'ia';
 }
 
 export interface CrisisDocument {
@@ -62,6 +84,8 @@ export interface CrisisCommunication {
   subject: string | null;
   content: string;
   status: 'brouillon' | 'envoye' | 'echec';
+  direction?: 'interne' | 'externe';
+  created_at?: string;
 }
 
 export interface PcaActivity {
