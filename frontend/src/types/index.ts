@@ -101,6 +101,10 @@ export interface CrisisDecision {
   acknowledged_by_display_name?: string | null;
   acknowledged_by_username?: string | null;
   acknowledgment_comment?: string | null;
+  response_text?: string | null;
+  response_document_id?: number | null;
+  response_document_name?: string | null;
+  responded_at?: string | null;
   crisis_title?: string;
   crisis_status?: CrisisStatus;
   active?: boolean;

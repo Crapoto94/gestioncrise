@@ -1,6 +1,7 @@
 const express = require('express');
 const controller = require('./crises.controller');
 const { requireAuth } = require('../../middlewares/auth');
+const { requireRole } = require('../../middlewares/roles');
 const { auditLog } = require('../../middlewares/audit');
 
 const router = express.Router();
@@ -21,12 +22,17 @@ router.post('/', auditLog('crises'), controller.create);
 router.get('/families', controller.listFamilies);
 router.get('/ia-models', controller.listIaModels);
 router.get('/live', controller.listLive);
+router.get('/teams-sync-log', controller.listTeamsSyncLog);
 router.get('/teams/search', controller.searchTeamsThreads);
 router.get('/:id', controller.getOne);
 router.put('/:id', auditLog('crises'), controller.update);
+// Suppression définitive — réservée à l'administration (DSI/RSSI/DPO),
+// jamais accessible aux autres rôles même s'ils peuvent gérer une crise.
+router.delete('/:id', requireRole('DSI', 'RSSI', 'DPO'), auditLog('crises'), controller.removeCrisis);
 router.post('/:id/transition', auditLog('crises'), controller.transition);
 
 router.post('/:id/teams/import', auditLog('crises'), controller.importTeamsThread);
+router.post('/:id/teams/sync', auditLog('crises'), controller.syncTeams);
 router.post('/:id/analyze', controller.startAnalysis);
 router.get('/:id/analyze/status/:jobId', controller.getAnalysisStatus);
 

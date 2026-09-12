@@ -16,10 +16,14 @@ interface Summary {
 
 export function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [pendingDecisionsCount, setPendingDecisionsCount] = useState(0);
+  const [liveCrisesCount, setLiveCrisesCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.get('/dashboard/summary').then((r) => setSummary(r.data)).catch((e) => setError(e.message));
+    api.get('/decisions', { params: { acknowledged: false } }).then((r) => setPendingDecisionsCount(r.data.length)).catch(() => {});
+    api.get('/crises/live').then((r) => setLiveCrisesCount(r.data.length)).catch(() => {});
   }, []);
 
   return (
@@ -30,6 +34,21 @@ export function Dashboard() {
         <p className="text-gray-500">Chargement…</p>
       ) : (
         <>
+          <div className="grid grid-cols-3 gap-4">
+            <Link to="/crises" className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
+              <div className="text-sm text-gray-500">Crises en cours</div>
+              <div className="text-3xl font-semibold">{summary.activeCrises.length}</div>
+            </Link>
+            <Link to="/crises-en-cours" className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
+              <div className="text-sm text-gray-500">Suivies en temps réel (IA)</div>
+              <div className={`text-3xl font-semibold ${liveCrisesCount > 0 ? 'text-red-500' : ''}`}>{liveCrisesCount}</div>
+            </Link>
+            <Link to="/decisions" className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
+              <div className="text-sm text-gray-500">Décisions à acquitter</div>
+              <div className="text-3xl font-semibold">{pendingDecisionsCount}</div>
+            </Link>
+          </div>
+
           <div className="grid grid-cols-4 gap-4">
             {['faible', 'moyenne', 'haute', 'critique'].map((sev) => {
               const count = summary.crisesBySeverity.find((s) => s.severity === sev)?.count || 0;
@@ -70,22 +89,6 @@ export function Dashboard() {
               </ul>
             </section>
           </div>
-
-          <section className="bg-white rounded-lg shadow-sm p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-medium">Décisions en attente</h2>
-              <Link to="/decisions" className="text-xs text-ville hover:underline">Suivi & acquittement →</Link>
-            </div>
-            {summary.recentDecisions.length === 0 && <p className="text-sm text-gray-500">Aucune décision en attente.</p>}
-            <ul className="space-y-2">
-              {summary.recentDecisions.map((d) => (
-                <li key={d.id} className="text-sm flex justify-between">
-                  <span>{d.title} <span className="text-gray-400">— {d.crisis_title}</span></span>
-                  <span className="text-gray-400">{d.due_at ? new Date(d.due_at).toLocaleDateString('fr-FR') : ''}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
 
           <HistoriqueSection historique={summary.historique} />
         </>

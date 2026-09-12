@@ -74,9 +74,17 @@ export function Admin() {
       <PromptEditor
         settingKey="crisis_ia_realtime_prompt"
         title="Analyse IA temps réel des crises ouvertes — prompt"
-        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{TRANSCRIPTION}']}
+        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{TRANSCRIPTION}']}
         models={models}
-        hint="Ré-exécuté automatiquement toutes les 5 minutes tant qu'une crise reste ouverte avec un fil Teams associé."
+        hint="Ré-exécuté automatiquement toutes les 5 minutes tant qu'une crise reste ouverte avec un fil Teams associé — l'IA n'est en fait sollicitée que si le fil Teams a changé depuis la dernière vérification."
+      />
+
+      <PromptEditor
+        settingKey="crisis_ia_sync_prompt"
+        title="Synchro Teams manuelle — prompt"
+        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{ACTIONS_EN_COURS}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{TRANSCRIPTION}']}
+        models={models}
+        hint="Déclenché par le bouton « Synchro Teams » (Crises en cours) — fournit en plus la main courante et les actions déjà enregistrées, pour que l'IA ne propose que du nouveau."
       />
 
       <section className="bg-white rounded-lg shadow-sm p-4">
@@ -107,7 +115,69 @@ export function Admin() {
           </table>
         </div>
       </section>
+
+      <IaLogSection />
     </div>
+  );
+}
+
+interface IaLogEntry {
+  id: number; kind: string; crisis_id: number | null; crisis_title: string | null;
+  model: string | null; prompt: string; response: string | null; error: string | null;
+  duration_ms: number | null; created_at: string;
+}
+
+/** Historique des appels IA (prompt envoyé + réponse) — traçabilité/debug. */
+function IaLogSection() {
+  const [logs, setLogs] = useState<IaLogEntry[]>([]);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  useEffect(() => { api.get('/admin/ia-logs', { params: { limit: 50 } }).then((r) => setLogs(r.data)).catch(() => {}); }, []);
+
+  return (
+    <section className="bg-white rounded-lg shadow-sm p-4">
+      <h2 className="font-medium mb-3">Historique des appels IA</h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-gray-500">
+            <tr><th className="p-2">Date</th><th className="p-2">Type</th><th className="p-2">Crise</th><th className="p-2">Modèle</th><th className="p-2">Durée</th><th className="p-2">Statut</th></tr>
+          </thead>
+          <tbody>
+            {logs.map((l) => (
+              <React.Fragment key={l.id}>
+                <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => setExpanded(expanded === l.id ? null : l.id)}>
+                  <td className="p-2 text-xs text-gray-500">{new Date(l.created_at).toLocaleString('fr-FR')}</td>
+                  <td className="p-2 text-xs uppercase tracking-wide text-gray-400">{l.kind}</td>
+                  <td className="p-2">{l.crisis_title || '—'}</td>
+                  <td className="p-2 text-xs">{l.model || 'défaut'}</td>
+                  <td className="p-2 text-xs text-gray-400">{l.duration_ms != null ? `${(l.duration_ms / 1000).toFixed(1)} s` : '—'}</td>
+                  <td className="p-2">
+                    {l.error
+                      ? <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700">Erreur</span>
+                      : <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">OK</span>}
+                  </td>
+                </tr>
+                {expanded === l.id && (
+                  <tr className="border-t bg-gray-50">
+                    <td colSpan={6} className="p-3 text-xs space-y-2">
+                      <div>
+                        <div className="text-gray-400 uppercase tracking-wide mb-1">Prompt envoyé</div>
+                        <pre className="whitespace-pre-wrap bg-white border rounded p-2 max-h-64 overflow-y-auto">{l.prompt}</pre>
+                      </div>
+                      <div>
+                        <div className="text-gray-400 uppercase tracking-wide mb-1">{l.error ? 'Erreur' : 'Réponse reçue'}</div>
+                        <pre className="whitespace-pre-wrap bg-white border rounded p-2 max-h-64 overflow-y-auto">{l.error || l.response}</pre>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+            {logs.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-gray-400">Aucun appel IA journalisé.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

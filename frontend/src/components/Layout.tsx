@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard, AlertTriangle, FileText, ShieldCheck, LifeBuoy,
   Map, Send, ClipboardList, Settings, LogOut, BookOpen, CheckSquare, Radio,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 
 // Les 9 menus de 07_UI_UX_ECRANS.md + PCGCN (plan communal de gestion de
 // crise numérique, demandé en complément des specs initiales) + Décisions
@@ -27,6 +28,27 @@ const MENU = [
 
 export function Layout() {
   const { user, hasRole, logout } = useAuth();
+  const [liveCrisesCount, setLiveCrisesCount] = useState(0);
+  const [totalCrisesCount, setTotalCrisesCount] = useState(0);
+  const [pendingDecisionsCount, setPendingDecisionsCount] = useState(0);
+
+  useEffect(() => {
+    function refresh() {
+      api.get('/crises/live').then((r) => setLiveCrisesCount(r.data.length)).catch(() => {});
+      api.get('/crises').then((r) => setTotalCrisesCount(r.data.length)).catch(() => {});
+      api.get('/decisions', { params: { acknowledged: false } }).then((r) => setPendingDecisionsCount(r.data.length)).catch(() => {});
+    }
+    refresh();
+    // Rafraîchi périodiquement — le menu doit refléter l'arrivée/résolution
+    // d'une crise ou le traitement d'une décision même sans quitter la page.
+    const interval = setInterval(refresh, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const NAV_BADGES: Record<string, number> = {
+    '/crises': totalCrisesCount,
+    '/decisions': pendingDecisionsCount,
+  };
 
   return (
     <div className="flex min-h-screen">
@@ -38,20 +60,31 @@ export function Layout() {
           <div className="text-lg font-semibold mt-2">PGC — Gestion de Crise</div>
         </div>
         <nav className="flex-1 p-2 space-y-1">
-          {MENU.filter((item) => !item.roles || hasRole(...item.roles)).map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                `flex items-center gap-2 px-3 py-2 rounded text-sm transition-colors ${
-                  isActive ? 'bg-white/15 font-medium' : 'hover:bg-white/10 text-white/85'
-                }`
-              }
-            >
-              <Icon size={16} /> {label}
-            </NavLink>
-          ))}
+          {MENU.filter((item) => !item.roles || hasRole(...item.roles)).map(({ to, label, icon: Icon, end }) => {
+            // "Crises en cours" ressort en gras/rouge dès qu'au moins une
+            // crise ouverte est suivie en temps réel — signal visuel qu'il
+            // se passe quelque chose sans avoir à ouvrir la page.
+            const isLiveAlert = to === '/crises-en-cours' && liveCrisesCount > 0;
+            const badge = NAV_BADGES[to];
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 px-3 py-2 rounded text-sm transition-colors ${
+                    isLiveAlert
+                      ? `font-bold text-red-400 ${isActive ? 'bg-white/15' : 'hover:bg-white/10'}`
+                      : isActive ? 'bg-white/15 font-medium' : 'hover:bg-white/10 text-white/85'
+                  }`
+                }
+              >
+                <Icon size={16} /> {label}
+                {isLiveAlert && <span className="ml-auto text-xs bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center">{liveCrisesCount}</span>}
+                {!isLiveAlert && badge > 0 && <span className="ml-auto text-xs bg-white/15 text-white/90 rounded-full w-5 h-5 flex items-center justify-center">{badge}</span>}
+              </NavLink>
+            );
+          })}
         </nav>
         <div className="p-3 border-t border-white/10 text-sm">
           <div className="mb-2 text-white/80">{user?.displayName || user?.username}</div>

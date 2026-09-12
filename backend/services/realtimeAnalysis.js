@@ -10,6 +10,9 @@ const ia = require('./ia');
 const crisesRepo = require('../modules/crises/crises.repository');
 const settingsRepo = require('../modules/admin/settings.repository');
 const { parseAnalysisResponse, VALID_HORIZONS } = require('../utils/iaAnalysisResponse');
+const { buildCrisisHistoryContext } = require('../utils/crisisHistoryContext');
+const { buildDocumentReferenceContext } = require('../utils/documentReferenceContext');
+const referenceDocumentsRepo = require('../modules/referenceDocuments/referenceDocuments.repository');
 
 const CYCLE_MS = 5 * 60 * 1000;
 
@@ -20,20 +23,40 @@ TYPE : {TYPE}
 SÉVÉRITÉ DÉCLARÉE : {SEVERITE}
 STATUT ACTUEL : {STATUT}
 
+CRISES PASSÉES SIMILAIRES (pour t'appuyer sur des précédents connus) :
+{HISTORIQUE_CRISES}
+
+DOCUMENTS DE RÉFÉRENCE (procédures, chartes...) :
+{DOCUMENTS_REFERENCE}
+
 DISCUSSION TEAMS :
 {TRANSCRIPTION}
 
-Produis une note courte en Markdown (où en est-on, points de vigilance),
-puis un unique bloc \`\`\`json avec les clés "chronologie" (tableau de
-{date, contenu}, laisser vide si rien de nouveau) et "actions" (tableau de
-{quoi, qui, terme} — les propositions d'actions immédiates).`;
+Produis une note courte en Markdown (où en est-on, points de vigilance —
+appuie-toi sur l'historique et les documents ci-dessus quand c'est
+pertinent), puis un unique bloc \`\`\`json avec les clés "chronologie"
+(tableau de {date, contenu}, laisser vide si rien de nouveau) et "actions"
+(tableau de {quoi,
+qui, terme} — les propositions d'actions immédiates).`;
 
 async function runOnce(crisis) {
   const imported = await graph.importCrisisThread(crisis.teams_thread_id);
+  // Rien de nouveau dans Teams depuis la dernière vérification ? Pas la
+  // peine de solliciter l'IA (appel coûteux, ~1-2 min) pour ré-analyser un
+  // transcript identique — mais le transcript est toujours réenregistré
+  // (teams_imported_at reflète la dernière VÉRIFICATION, pas le dernier
+  // changement) et la vérification elle-même est toujours tracée.
+  const changed = imported.transcript !== (crisis.teams_transcript || '');
   const updated = await crisesRepo.saveTeamsImport(crisis.id, {
     teamId: imported.teamId, channelId: imported.channelId, threadId: imported.threadId, transcript: imported.transcript,
   });
+  await crisesRepo.logTeamsSync(crisis.id, {
+    source: 'realtime', changed, iaCalled: changed, transcriptLength: imported.transcript.length,
+  });
+  if (!changed) return { skipped: true };
 
+  const historiqueText = await buildCrisisHistoryContext(crisesRepo, crisis.id);
+  const documentsText = await buildDocumentReferenceContext(referenceDocumentsRepo);
   const promptRow = await settingsRepo.get('crisis_ia_realtime_prompt');
   const template = promptRow?.setting_value || DEFAULT_REALTIME_PROMPT;
   const prompt = template
@@ -41,9 +64,11 @@ async function runOnce(crisis) {
     .replace('{TYPE}', updated.type)
     .replace('{SEVERITE}', updated.severity)
     .replace('{STATUT}', updated.status)
+    .replace('{HISTORIQUE_CRISES}', historiqueText)
+    .replace('{DOCUMENTS_REFERENCE}', documentsText)
     .replace('{TRANSCRIPTION}', updated.teams_transcript);
 
-  const raw = await ia.queryAi(prompt);
+  const raw = await ia.queryAi(prompt, undefined, { kind: 'realtime', crisisId: crisis.id });
   const { synthese, chronologie, actions } = parseAnalysisResponse(raw);
   await crisesRepo.saveRealtimeAnalysis(crisis.id, { analysis: synthese });
 
@@ -78,8 +103,10 @@ async function runCycle() {
   }
   for (const crisis of crises) {
     try {
-      await runOnce(crisis);
-      console.log(`[realtimeAnalysis] crise #${crisis.id} (${crisis.title}) : analyse temps réel actualisée.`);
+      const result = await runOnce(crisis);
+      console.log(result?.skipped
+        ? `[realtimeAnalysis] crise #${crisis.id} (${crisis.title}) : aucune nouveauté dans Teams, IA non sollicitée.`
+        : `[realtimeAnalysis] crise #${crisis.id} (${crisis.title}) : analyse temps réel actualisée.`);
     } catch (err) {
       // Une crise en échec (Graph/IA indisponible, fil supprimé...) ne doit
       // jamais empêcher l'analyse des autres crises ouvertes.

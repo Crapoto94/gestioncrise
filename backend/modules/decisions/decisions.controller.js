@@ -4,6 +4,7 @@
 // exposer l'action d'acquittement de façon indépendante d'une crise
 // particulière (utile depuis un tableau de bord global).
 const repo = require('../crises/crises.repository');
+const documentsRepo = require('../documents/documents.repository');
 const { HttpError } = require('../../middlewares/errorHandler');
 
 const STATUS_LABELS = { a_faire: 'À faire', en_cours: 'En cours', fait: 'Fait', abandonnee: 'Abandonnée' };
@@ -65,4 +66,32 @@ async function setActive(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { list, acknowledge, unacknowledge, setActive };
+/**
+ * Répond à une action à réaliser — texte et/ou photo/fichier joint. Stocké
+ * pour être réinjecté dans une prochaine analyse IA ("Synchro Teams"), sans
+ * remplacer l'acquittement (une action peut être documentée avant d'être
+ * formellement acquittée).
+ */
+async function respond(req, res, next) {
+  try {
+    const decision = await repo.findDecisionById(Number(req.params.id));
+    if (!decision) throw new HttpError(404, 'Décision introuvable');
+    let documentId;
+    if (req.file) {
+      const doc = await documentsRepo.create({
+        crisisId: decision.crisis_id,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        sizeBytes: req.file.size,
+        uploadedBy: req.user.id,
+      });
+      documentId = doc.id;
+    }
+    if (!req.body.text && !documentId) throw new HttpError(400, 'Réponse vide (texte ou fichier requis)');
+    const updated = await repo.respondToDecision(decision.id, { text: req.body.text, documentId });
+    res.json(await repo.findDecisionById(updated.id));
+  } catch (err) { next(err); }
+}
+
+module.exports = { list, acknowledge, unacknowledge, setActive, respond };

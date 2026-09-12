@@ -6,6 +6,7 @@
 // IA_API_URL/IA_API_KEY ne sont à renseigner que si l'IA Locale est un jour
 // séparée de l'APM ; par défaut on retombe sur APM_API_URL/APM_API_KEY.
 const { createServiceClient, isReachable } = require('./httpClient');
+const { db } = require('../pg_db');
 
 const IA_URL = process.env.IA_API_URL || process.env.APM_API_URL || 'https://api.ivry.local';
 const IA_KEY = process.env.IA_API_KEY || process.env.APM_API_KEY;
@@ -34,16 +35,43 @@ async function listModels() {
   return raw.map((m) => (typeof m === 'string' ? m : (m?.name || m?.id || m?.label || String(m)))).filter(Boolean);
 }
 
+// Historise chaque appel IA (prompt envoyé + réponse reçue, ou erreur) dans
+// pgc.ia_call_log — traçabilité/debug quel que soit l'appelant. Ne doit
+// jamais faire échouer l'appel IA lui-même si l'écriture du log échoue
+// (ex. avant la migration 014, ou coupure DB passagère).
+async function logIaCall({ kind, crisisId, model, prompt, response, error, durationMs }) {
+  try {
+    await db.run(
+      `INSERT INTO pgc.ia_call_log (kind, crisis_id, model, prompt, response, error, duration_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [kind || 'autre', crisisId || null, model || null, prompt, response || null, error || null, durationMs]
+    );
+  } catch (err) {
+    console.error('[ia] échec de journalisation de l\'appel IA (non bloquant):', err.message);
+  }
+}
+
 /**
  * POST /api/v1/ai/query { prompt, model? } — requête générique, texte libre en
  * entrée/sortie. Base de toutes les fonctions IA de l'app : on construit le
  * prompt nous-mêmes plutôt que de dépendre d'endpoints métier dédiés côté API
  * (qui n'existent pas — confirmé par l'usage réel d'une autre app Ville).
+ * `logContext` optionnel : { kind, crisisId } pour retrouver l'appel dans
+ * l'historique (Admin → Historique IA).
  */
-async function queryAi(prompt, model) {
-  const data = await unwrap(client.post('/api/v1/ai/query', model ? { prompt, model } : { prompt }), 'query');
-  if (typeof data === 'string') return data;
-  return data?.response ?? data?.result ?? data?.answer ?? data?.text ?? data?.content ?? data?.message ?? JSON.stringify(data);
+async function queryAi(prompt, model, logContext = {}) {
+  const startedAt = Date.now();
+  try {
+    const data = await unwrap(client.post('/api/v1/ai/query', model ? { prompt, model } : { prompt }), 'query');
+    const text = typeof data === 'string'
+      ? data
+      : (data?.response ?? data?.result ?? data?.answer ?? data?.text ?? data?.content ?? data?.message ?? JSON.stringify(data));
+    await logIaCall({ ...logContext, model, prompt, response: text, durationMs: Date.now() - startedAt });
+    return text;
+  } catch (err) {
+    await logIaCall({ ...logContext, model, prompt, error: err.message, durationMs: Date.now() - startedAt });
+    throw err;
+  }
 }
 
 /** Chat de crise : historique de messages -> réponse de l'IA. */

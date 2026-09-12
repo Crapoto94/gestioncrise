@@ -13,6 +13,12 @@ const list = (filters = {}) => {
 
 const findById = (id) => db.get('SELECT * FROM pgc.crises WHERE id = $1', [id]);
 
+// Suppression définitive (admin uniquement, cf. crises.routes.js) — toutes
+// les sous-ressources (événements, décisions, documents, communications,
+// membres, boîtes mail) sont en ON DELETE CASCADE, seuls les fichiers
+// physiques des documents doivent être nettoyés séparément par l'appelant.
+const remove = (id) => db.run('DELETE FROM pgc.crises WHERE id = $1', [id]);
+
 const create = ({ title, type, severity, description, createdBy }) =>
   db.get(
     `INSERT INTO pgc.crises (title, type, severity, description, created_by)
@@ -68,6 +74,26 @@ const saveRealtimeAnalysis = (id, { analysis, model }) =>
 const listOpenWithTeamsThread = () =>
   db.all(`SELECT * FROM pgc.crises WHERE status <> 'cloturee' AND teams_thread_id IS NOT NULL`);
 
+// Trace chaque vérification du fil Teams — permet de savoir si le contenu
+// avait changé et si l'IA a donc été interrogée (voir migration 016).
+const logTeamsSync = (crisisId, { source, changed, iaCalled, transcriptLength }) =>
+  db.run(
+    `INSERT INTO pgc.teams_sync_log (crisis_id, source, changed, ia_called, transcript_length)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [crisisId, source, changed, iaCalled, transcriptLength || null]
+  );
+
+// Timeline "Synchro Teams + interrogation IA" (bandeau de Crises en cours) —
+// toutes crises confondues, la plus récente en premier.
+const listRecentTeamsSyncLogs = (limit = 30) =>
+  db.all(
+    `SELECT l.*, c.title AS crisis_title
+     FROM pgc.teams_sync_log l
+     JOIN pgc.crises c ON c.id = l.crisis_id
+     ORDER BY l.checked_at DESC LIMIT $1`,
+    [limit]
+  );
+
 const setStatus = (id, status) => {
   // COALESCE : ne fixe closed_at à maintenant que s'il n'a pas déjà été
   // renseigné manuellement (ex. backfill d'une crise historique, ou édition
@@ -114,10 +140,12 @@ const addDecision = (crisisId, { title, description, ownerId, ownerLabel, horizo
 const DECISION_SELECT = `
   SELECT d.*, u.display_name AS owner_display_name, u.username AS owner_username,
          a.display_name AS acknowledged_by_display_name, a.username AS acknowledged_by_username,
-         c.title AS crisis_title, c.status AS crisis_status
+         c.title AS crisis_title, c.status AS crisis_status,
+         doc.original_name AS response_document_name
   FROM pgc.crisis_decisions d
   LEFT JOIN pgc.users u ON u.id = d.owner_id
   LEFT JOIN pgc.users a ON a.id = d.acknowledged_by
+  LEFT JOIN pgc.crisis_documents doc ON doc.id = d.response_document_id
   JOIN pgc.crises c ON c.id = d.crisis_id
 `;
 
@@ -199,6 +227,15 @@ const unacknowledgeDecision = (id) =>
     [id]
   );
 
+// Réponse (texte et/ou photo jointe) à une action à réaliser — collectée
+// pour être réinjectée dans une analyse IA ultérieure (cf. "Synchro Teams").
+const respondToDecision = (id, { text, documentId }) =>
+  db.get(
+    `UPDATE pgc.crisis_decisions SET response_text = $1, response_document_id = $2, responded_at = now(), updated_at = now()
+     WHERE id = $3 RETURNING *`,
+    [text || null, documentId || null, id]
+  );
+
 // --- Membres cellule -------------------------------------------------------
 const addMember = (crisisId, userId, cellRole) =>
   db.run(
@@ -218,11 +255,12 @@ const removeMember = (crisisId, userId) =>
   db.run('DELETE FROM pgc.crisis_members WHERE crisis_id = $1 AND user_id = $2', [crisisId, userId]);
 
 module.exports = {
-  WORKFLOW_ORDER, list, findById, create, update, setStatus,
+  WORKFLOW_ORDER, list, findById, create, update, remove, setStatus,
   addEvent, listEvents, removeEventsBySource,
   addDecision, listDecisions, listAllDecisions, findDecisionById,
   removeDecisionsBySource, removeUnacknowledgedDecisionsBySource,
-  updateDecision, acknowledgeDecision, unacknowledgeDecision,
+  updateDecision, acknowledgeDecision, unacknowledgeDecision, respondToDecision,
   addMember, listMembers, removeMember,
   saveTeamsImport, saveIaAnalysis, saveRealtimeAnalysis, listOpenWithTeamsThread,
+  logTeamsSync, listRecentTeamsSyncLogs,
 };

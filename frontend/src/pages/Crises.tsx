@@ -139,18 +139,21 @@ export function Crises() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((c) => (
-              <tr key={c.id} className="border-t hover:bg-gray-50">
-                <td className="p-3">
-                  <Link to={`/crises/${c.id}`} className="text-ville hover:underline">{c.title}</Link>
-                </td>
-                <td className="p-3">{TYPE_LABELS[c.type] || c.type}</td>
-                <td className="p-3"><SeverityBadge severity={c.severity} /></td>
-                <td className="p-3"><StatusBadge status={c.status} /></td>
-                <td className="p-3 text-gray-500">{new Date(c.opened_at).toLocaleDateString('fr-FR')}</td>
-                <td className="p-3 text-gray-500">{durationLabel(c) || (c.closed_at ? '—' : 'en cours')}</td>
-              </tr>
-            ))}
+            {filtered.map((c) => {
+              const enCours = c.status !== 'cloturee';
+              return (
+                <tr key={c.id} className={`border-t hover:bg-gray-100 ${enCours ? 'bg-amber-50' : ''}`}>
+                  <td className="p-3">
+                    <Link to={`/crises/${c.id}`} className="text-ville hover:underline font-semibold">{c.title}</Link>
+                  </td>
+                  <td className="p-3">{TYPE_LABELS[c.type] || c.type}</td>
+                  <td className="p-3"><SeverityBadge severity={c.severity} /></td>
+                  <td className="p-3"><StatusBadge status={c.status} /></td>
+                  <td className="p-3 text-gray-500">{new Date(c.opened_at).toLocaleDateString('fr-FR')}</td>
+                  <td className="p-3 text-gray-500">{durationLabel(c) || (c.closed_at ? '—' : 'en cours')}</td>
+                </tr>
+              );
+            })}
             {filtered.length === 0 && (
               <tr><td colSpan={6} className="p-6 text-center text-gray-400">Aucune crise ne correspond aux filtres.</td></tr>
             )}
@@ -244,7 +247,7 @@ function NewCrisisForm({ families, onSubmit, onCancel }: {
             <div className="flex gap-2">
               <input
                 className="flex-1 border rounded px-3 py-2 text-sm"
-                placeholder="Rechercher un fil dans le canal Teams de crise (mots-clés du sujet)…"
+                placeholder="Rechercher un fil dans le canal Teams de crise, 10 derniers jours (mots-clés du sujet)…"
                 value={teamsQuery}
                 onChange={(e) => setTeamsQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); searchTeams(); } }}

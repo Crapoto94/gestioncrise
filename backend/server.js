@@ -66,6 +66,7 @@ app.use('/api/v1/auth', require('./modules/auth/auth.routes'));
 app.use('/api/v1/users', require('./modules/users/users.routes'));
 app.use('/api/v1/crises', require('./modules/crises/crises.routes'));
 app.use('/api/v1/decisions', require('./modules/decisions/decisions.routes'));
+app.use('/api/v1/reference-documents', require('./modules/referenceDocuments/referenceDocuments.routes'));
 app.use('/api/v1/crises/:id/documents', require('./modules/documents/documents.routes'));
 app.use('/api/v1/crises/:id/communications', require('./modules/communications/communications.routes'));
 app.use('/api/v1/crises/:id/retex', require('./modules/retex/retex.routes'));

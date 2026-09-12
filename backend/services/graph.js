@@ -97,11 +97,21 @@ function stripHtml(html) {
   return (html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+const THREAD_SEARCH_WINDOW_DAYS = 10;
+
 /**
  * Fils du canal Teams de crise configuré (GRAPH_CRISIS_TEAM_ID/CHANNEL_ID),
- * filtrés par sous-chaîne sur le sujet/texte — alimente le sélecteur
- * "Importer Teams" d'une fiche crise. Pas de comptage de réponses (coûterait
- * un appel par fil) : juste de quoi identifier le bon fil visuellement.
+ * filtrés par sous-chaîne sur le sujet/texte et restreints aux
+ * `THREAD_SEARCH_WINDOW_DAYS` derniers jours (pour limiter le temps de
+ * recherche — un canal de crise actif peut accumuler des centaines de fils,
+ * et l'usage réel est de retrouver l'incident en cours, pas l'historique).
+ * Note : l'API Graph "list channel messages" ne supporte ni `$filter` ni
+ * `$orderby` sur createdDateTime (rejeté avec "Query option not allowed"),
+ * et l'ordre renvoyé n'est PAS chronologique — impossible de s'arrêter tôt
+ * pendant la pagination ; le filtrage par date se fait donc après
+ * récupération complète, pas en réduisant les appels réseau eux-mêmes.
+ * Pas de comptage de réponses (coûterait un appel par fil) : juste de quoi
+ * identifier le bon fil visuellement.
  */
 async function searchCrisisChannelThreads(query, limit = 30) {
   if (!CRISIS_TEAM_ID || !CRISIS_CHANNEL_ID) {
@@ -109,7 +119,9 @@ async function searchCrisisChannelThreads(query, limit = 30) {
   }
   const messages = await listChannelMessages(CRISIS_TEAM_ID, CRISIS_CHANNEL_ID);
   const q = (query || '').toLowerCase();
+  const cutoff = Date.now() - THREAD_SEARCH_WINDOW_DAYS * 24 * 3600 * 1000;
   const filtered = messages
+    .filter((m) => new Date(m.createdDateTime).getTime() >= cutoff)
     .map((m) => ({
       id: m.id,
       date: m.createdDateTime,
@@ -119,6 +131,22 @@ async function searchCrisisChannelThreads(query, limit = 30) {
     .filter((m) => !q || m.sujet.toLowerCase().includes(q))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
   return filtered.slice(0, limit);
+}
+
+/**
+ * Signale la présence de contenu non textuel (photo collée inline, fichier
+ * joint) sans tenter de le décrire — le contrat IA Locale confirmé
+ * (POST /api/v1/ai/query) est texte seul, aucune analyse d'image possible
+ * ici. Au moins la cellule de crise sait qu'il faut aller regarder le fil
+ * Teams directement pour ce message.
+ */
+function describeAttachments(m) {
+  const notes = [];
+  if (/<img[^>]*>/i.test(m.body?.content || '')) notes.push('[photo jointe]');
+  for (const att of m.attachments || []) {
+    if (att.name) notes.push(`[pièce jointe: ${att.name}]`);
+  }
+  return notes.join(' ');
 }
 
 /** Importe un fil complet (message racine + réponses) du canal de crise configuré, formaté en texte. */
@@ -133,10 +161,21 @@ async function importCrisisThread(threadId) {
   const all = [root, ...replies].sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime));
   const transcript = all.map((m) => {
     const auteur = m.from?.user?.displayName || m.from?.application?.displayName || 'Inconnu';
-    return `[${m.createdDateTime}] ${auteur}: ${stripHtml(m.body?.content)}`;
+    const attachmentNote = describeAttachments(m);
+    const texte = [stripHtml(m.body?.content), attachmentNote].filter(Boolean).join(' ');
+    return `[${m.createdDateTime}] ${auteur}: ${texte}`;
   }).join('\n');
   return { teamId: CRISIS_TEAM_ID, channelId: CRISIS_CHANNEL_ID, threadId, sujet: root.subject, transcript };
 }
+
+// Note : publier automatiquement dans le fil Teams a été envisagé puis
+// abandonné — Microsoft Graph n'expose "ChannelMessage.Send" qu'en
+// permission Déléguée (utilisateur signé), jamais en Application (app-only,
+// client_credentials) comme le reste de cette intégration. Un webhook
+// entrant Teams permettrait de poster un nouveau message dans le canal,
+// mais uniquement en tête de canal (jamais en réponse dans un fil
+// existant) — écarté pour l'instant, les recommandations de l'IA restent
+// donc visibles uniquement dans PGC (onglet Teams & IA / Crises en cours).
 
 async function ping() {
   if (!TENANT_ID || !CLIENT_ID || !CLIENT_SECRET) {

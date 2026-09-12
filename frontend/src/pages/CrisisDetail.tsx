@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Pencil } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Pencil, Trash2 } from 'lucide-react';
 import { api, downloadFile } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { SeverityBadge } from '../components/StatusBadge';
 import { Timeline } from '../components/Timeline';
 import { WorkflowStepper } from '../components/WorkflowStepper';
@@ -36,17 +37,33 @@ const WORKFLOW = ['detection', 'qualification', 'cellule', 'resolution', 'retex'
 
 export function CrisisDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { hasRole } = useAuth();
   const crisisId = Number(id);
   const [crisis, setCrisis] = useState<Crisis | null>(null);
   const [tab, setTab] = useState<Tab>('Synthèse');
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   function loadCrisis() {
     api.get(`/crises/${crisisId}`).then((r) => setCrisis(r.data)).catch((e) => setError(e.message));
   }
   useEffect(loadCrisis, [crisisId]);
+
+  async function deleteCrisis() {
+    if (!crisis) return;
+    if (!window.confirm(`Supprimer définitivement la crise « ${crisis.title} » ? Cette action est irréversible (documents, décisions, main courante… tout est perdu).`)) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/crises/${crisisId}`);
+      navigate('/crises');
+    } catch (e) {
+      setError((e as Error).message);
+      setDeleting(false);
+    }
+  }
 
   async function advance(reason: string) {
     if (!crisis) return;
@@ -106,6 +123,16 @@ export function CrisisDetail() {
                className="text-sm px-3 py-2 rounded border hover:bg-gray-50">PDF</button>
             <button onClick={() => downloadFile(`/crises/${crisisId}/exports/docx`, `crise-${crisisId}.docx`)}
                className="text-sm px-3 py-2 rounded border hover:bg-gray-50">DOCX</button>
+            {hasRole('DSI', 'RSSI', 'DPO') && (
+              <button
+                onClick={deleteCrisis}
+                disabled={deleting}
+                title="Supprimer définitivement cette crise (admin)"
+                className="text-sm px-3 py-2 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 flex items-center gap-1.5"
+              >
+                <Trash2 size={14} /> {deleting ? 'Suppression…' : 'Supprimer'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -780,7 +807,7 @@ function TeamsIaTab({ crisisId, crisis, onUpdated }: { crisisId: number; crisis:
   if (!crisis.teams_transcript) {
     return (
       <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
-        <p className="text-sm text-gray-500">Recherchez le fil Teams correspondant à cette crise dans le canal de crise configuré, puis importez-le.</p>
+        <p className="text-sm text-gray-500">Recherchez le fil Teams correspondant à cette crise dans le canal de crise configuré (10 derniers jours), puis importez-le.</p>
         <div className="flex gap-2">
           <input
             className="flex-1 border rounded px-3 py-2 text-sm"

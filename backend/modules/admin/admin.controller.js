@@ -47,4 +47,19 @@ async function listIaModels(req, res, next) {
   try { res.json(await ia.listModels()); } catch (err) { next(err); }
 }
 
-module.exports = { integrationsStatus, getSetting, setSetting, listIaModels };
+/** Historique des appels IA (prompt envoyé + réponse) — traçabilité/debug. */
+async function listIaLogs(req, res, next) {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const { rows } = await pool.query(
+      `SELECT l.*, c.title AS crisis_title
+       FROM pgc.ia_call_log l
+       LEFT JOIN pgc.crises c ON c.id = l.crisis_id
+       ORDER BY l.created_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
+module.exports = { integrationsStatus, getSetting, setSetting, listIaModels, listIaLogs };

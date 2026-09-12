@@ -10,5 +10,6 @@ router.get('/integrations-status', controller.integrationsStatus);
 router.get('/settings/:key', controller.getSetting);
 router.put('/settings/:key', controller.setSetting);
 router.get('/ia-models', controller.listIaModels);
+router.get('/ia-logs', controller.listIaLogs);
 
 module.exports = router;
