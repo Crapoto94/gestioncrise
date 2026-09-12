@@ -11,3 +11,4 @@ Thumbs.db
 coverage/
 *.pgdata/
 pgdata/
+.claude/settings.local.json
