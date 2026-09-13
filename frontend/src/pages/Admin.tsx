@@ -24,7 +24,11 @@ const INTEGRATIONS: { key: keyof StatusResponse; label: string }[] = [
 
 const ALL_ROLES = ['DSI', 'RSSI', 'IRS', 'SSD', 'BDP', 'DGS', 'DIRECTION', 'ELU', 'DPO'];
 
+const ADMIN_TABS = ['Intégrations', 'IA', 'Surveillance', 'Utilisateurs & rôles', 'Historique IA'] as const;
+type AdminTab = typeof ADMIN_TABS[number];
+
 export function Admin() {
+  const [tab, setTab] = useState<AdminTab>('Intégrations');
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [users, setUsers] = useState<AppUser[]>([]);
 
@@ -42,93 +46,115 @@ export function Admin() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold">Administration</h1>
 
-      <section className="bg-white rounded-lg shadow-sm p-4">
-        <h2 className="font-medium mb-3">Statut des intégrations</h2>
-        {!status ? <p className="text-sm text-gray-500">Chargement…</p> : (
-          <ul className="grid grid-cols-2 gap-2 text-sm">
-            {INTEGRATIONS.map(({ key, label }) => {
-              const s = status[key];
-              return (
-                <li key={key} className="flex items-center justify-between border rounded p-2">
-                  <span>{label}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded ${s.ok ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`} title={s.detail}>
-                    {s.ok ? 'OK' : 'Indisponible'}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+      <div className="border-b flex gap-4">
+        {ADMIN_TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`pb-2 text-sm ${tab === t ? 'border-b-2 border-ville text-ville font-medium' : 'text-gray-500'}`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-6">
+        {tab === 'Intégrations' && (
+          <section className="bg-white rounded-lg shadow-sm p-4">
+            <h2 className="font-medium mb-3">Statut des intégrations</h2>
+            {!status ? <p className="text-sm text-gray-500">Chargement…</p> : (
+              <ul className="grid grid-cols-2 gap-2 text-sm">
+                {INTEGRATIONS.map(({ key, label }) => {
+                  const s = status[key];
+                  return (
+                    <li key={key} className="flex items-center justify-between border rounded p-2">
+                      <span>{label}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded ${s.ok ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`} title={s.detail}>
+                        {s.ok ? 'OK' : 'Indisponible'}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
         )}
-      </section>
 
-      <DefaultModelSelector models={models} />
+        {tab === 'IA' && (
+          <>
+            <DefaultModelSelector models={models} />
 
-      <MonitoringChannelsSection />
+            <PromptEditor
+              settingKey="crisis_ia_prompt"
+              title="Analyse IA rétrospective des crises — prompt"
+              placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{TRANSCRIPTION}']}
+              models={models}
+            />
 
-      <PromptEditor
-        settingKey="crisis_ia_prompt"
-        title="Analyse IA rétrospective des crises — prompt"
-        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{TRANSCRIPTION}']}
-        models={models}
-      />
+            <PromptEditor
+              settingKey="crisis_ia_realtime_ingestion_prompt"
+              title="Analyse IA temps réel — étape 1 : ingestion (mise à jour de la main courante)"
+              placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{TRANSCRIPTION}', '{CANAUX_SURVEILLANCE}']}
+              models={models}
+              hint="Ré-exécuté automatiquement toutes les 5 minutes tant qu'une crise reste ouverte avec un fil Teams associé — compare le fil Teams et les canaux de surveillance (état infrastructure) à la main courante et n'y ajoute que le nouveau, reformulé."
+            />
 
-      <PromptEditor
-        settingKey="crisis_ia_realtime_ingestion_prompt"
-        title="Analyse IA temps réel — étape 1 : ingestion (mise à jour de la main courante)"
-        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{TRANSCRIPTION}', '{CANAUX_SURVEILLANCE}']}
-        models={models}
-        hint="Ré-exécuté automatiquement toutes les 5 minutes tant qu'une crise reste ouverte avec un fil Teams associé — compare le fil Teams et les canaux de surveillance (état infrastructure) à la main courante et n'y ajoute que le nouveau, reformulé."
-      />
+            <PromptEditor
+              settingKey="crisis_ia_realtime_diagnostic_prompt"
+              title="Analyse IA temps réel — étape 2 : diagnostic et propositions"
+              placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{ACTIONS_EN_COURS}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{DOCUMENTS_CRISE}']}
+              models={models}
+              hint="Enchaîné juste après l'étape 1 (main courante déjà à jour) — affine le diagnostic et propose des actions de vérification/résolution, chacune à acquitter individuellement avec un commentaire obligatoire."
+            />
 
-      <PromptEditor
-        settingKey="crisis_ia_realtime_diagnostic_prompt"
-        title="Analyse IA temps réel — étape 2 : diagnostic et propositions"
-        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{ACTIONS_EN_COURS}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{DOCUMENTS_CRISE}']}
-        models={models}
-        hint="Enchaîné juste après l'étape 1 (main courante déjà à jour) — affine le diagnostic et propose des actions de vérification/résolution, chacune à acquitter individuellement avec un commentaire obligatoire."
-      />
+            <PromptEditor
+              settingKey="crisis_ia_sync_prompt"
+              title="Synchro Teams manuelle — prompt"
+              placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{ACTIONS_EN_COURS}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{TRANSCRIPTION}']}
+              models={models}
+              hint="Déclenché par le bouton « Synchro Teams » (Crises en cours) ou par l'acquittement d'une synthèse IA — fournit en plus la main courante et les actions déjà enregistrées, pour que l'IA ne propose que du nouveau. Toujours exécuté, même sans nouveauté dans Teams (consigne de réflexion approfondie ajoutée automatiquement dans ce cas). Sans effet pour une crise dont le suivi est en pause."
+            />
+          </>
+        )}
 
-      <PromptEditor
-        settingKey="crisis_ia_sync_prompt"
-        title="Synchro Teams manuelle — prompt"
-        placeholders={['{TITRE}', '{TYPE}', '{SEVERITE}', '{STATUT}', '{MAIN_COURANTE}', '{ACTIONS_EN_COURS}', '{HISTORIQUE_CRISES}', '{DOCUMENTS_REFERENCE}', '{TRANSCRIPTION}']}
-        models={models}
-        hint="Déclenché par le bouton « Synchro Teams » (Crises en cours) ou par l'acquittement d'une synthèse IA — fournit en plus la main courante et les actions déjà enregistrées, pour que l'IA ne propose que du nouveau. Toujours exécuté, même sans nouveauté dans Teams (consigne de réflexion approfondie ajoutée automatiquement dans ce cas)."
-      />
+        {tab === 'Surveillance' && <MonitoringChannelsSection />}
 
-      <section className="bg-white rounded-lg shadow-sm p-4">
-        <h2 className="font-medium mb-3">Utilisateurs & rôles</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-gray-500">
-              <tr><th className="p-2">Utilisateur</th><th className="p-2">Type</th>{ALL_ROLES.map((r) => <th key={r} className="p-2">{r}</th>)}</tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-t">
-                  <td className="p-2">{u.display_name || u.username}</td>
-                  <td className="p-2 text-xs text-gray-400">{u.is_local ? 'Local' : 'AD'}</td>
-                  {ALL_ROLES.map((role) => (
-                    <td key={role} className="p-2 text-center">
-                      <input
-                        type="checkbox"
-                        checked={u.roles.includes(role)}
-                        onChange={() => toggleRole(u.id, role, u.roles)}
-                      />
-                    </td>
+        {tab === 'Utilisateurs & rôles' && (
+          <section className="bg-white rounded-lg shadow-sm p-4">
+            <h2 className="font-medium mb-3">Utilisateurs & rôles</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-gray-500">
+                  <tr><th className="p-2">Utilisateur</th><th className="p-2">Type</th>{ALL_ROLES.map((r) => <th key={r} className="p-2">{r}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.id} className="border-t">
+                      <td className="p-2">{u.display_name || u.username}</td>
+                      <td className="p-2 text-xs text-gray-400">{u.is_local ? 'Local' : 'AD'}</td>
+                      {ALL_ROLES.map((role) => (
+                        <td key={role} className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={u.roles.includes(role)}
+                            onChange={() => toggleRole(u.id, role, u.roles)}
+                          />
+                        </td>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
-              ))}
-              {users.length === 0 && <tr><td colSpan={ALL_ROLES.length + 2} className="p-4 text-center text-gray-400">Aucun utilisateur.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                  {users.length === 0 && <tr><td colSpan={ALL_ROLES.length + 2} className="p-4 text-center text-gray-400">Aucun utilisateur.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
-      <IaLogSection />
+        {tab === 'Historique IA' && <IaLogSection />}
+      </div>
     </div>
   );
 }

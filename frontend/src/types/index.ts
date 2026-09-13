@@ -35,6 +35,7 @@ export interface Crisis {
   ia_realtime_analysis?: string | null;
   ia_realtime_analysis_model?: string | null;
   ia_realtime_analysis_at?: string | null;
+  monitoring_paused?: boolean;
   incident_kind?: 'interruption' | 'degradation' | null;
   services_impactes?: string | null;
   notes?: string | null;

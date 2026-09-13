@@ -196,6 +196,10 @@ async function runCycle() {
     return;
   }
   for (const crisis of crises) {
+    if (crisis.monitoring_paused) {
+      console.log(`[realtimeAnalysis] crise #${crisis.id} (${crisis.title}) : suivi en pause, cycle sauté.`);
+      continue;
+    }
     try {
       const result = await runOnce(crisis);
       console.log(result?.changed

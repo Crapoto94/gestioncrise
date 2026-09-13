@@ -34,6 +34,7 @@ router.post('/:id/transition', auditLog('crises'), controller.transition);
 
 router.post('/:id/teams/import', auditLog('crises'), controller.importTeamsThread);
 router.post('/:id/teams/sync', auditLog('crises'), controller.syncTeams);
+router.post('/:id/monitoring-pause', auditLog('crises'), controller.setMonitoringPaused);
 router.post('/:id/teams/acknowledge', upload.single('file'), auditLog('crises'), controller.acknowledgeRealtimeAnalysis);
 router.post('/:id/analyze', controller.startAnalysis);
 router.get('/:id/analyze/status/:jobId', controller.getAnalysisStatus);

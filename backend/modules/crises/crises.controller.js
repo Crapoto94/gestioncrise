@@ -309,10 +309,12 @@ function getAnalysisStatus(req, res) {
  * déjà produite pour cette crise (cf. utils/askIaPrompt.js — le prompt
  * précédent lui est redonné en clair). Les fichiers joints sont conservés
  * comme documents de la crise (visibles dans l'onglet Documents et pris en
- * compte par les analyses suivantes), pas seulement consommés une fois. La
- * réponse est journalisée dans la main courante pour rester visible sans
- * avoir à repasser par cette case (même registre de jobs asynchrones que le
- * reste de l'analyse IA — une génération peut prendre plusieurs minutes).
+ * compte par les analyses suivantes), pas seulement consommés une fois.
+ * Contrairement aux autres analyses IA, la question et la réponse ne sont
+ * PAS journalisées dans la main courante (pas pertinent pour l'historique de
+ * la crise, demande explicite) — la réponse est renvoyée directement au
+ * front avec le modèle qui a répondu (même registre de jobs asynchrones que
+ * le reste de l'analyse IA — une génération peut prendre plusieurs minutes).
  */
 async function askIa(req, res, next) {
   try {
@@ -358,21 +360,15 @@ async function askIa(req, res, next) {
         const model = await resolveIaModel(settingsRepo, req.body?.model);
         const response = await ia.queryAi(prompt, model, { kind: 'ask', crisisId: crisis.id });
 
-        job.status = 'enregistrement dans la main courante';
-        job.progress = 85;
-        // source par défaut ('manuel', pas 'ia') : c'est un humain qui a posé
-        // la question, l'entrée ne doit jamais être effacée par
-        // removeEventsBySource('ia') lors d'une prochaine analyse rétrospective.
-        const attachmentNote = savedDocs.length ? ` (pièce(s) jointe(s) : ${savedDocs.map((d) => d.original_name).join(', ')})` : '';
-        await repo.addEvent(crisis.id, {
-          content: `Question posée à l'IA : « ${userPrompt} »${attachmentNote}\n\nRéponse :\n${response}`,
-          eventType: 'ia_question_libre',
-          createdBy: req.user.id,
-        });
-
+        // Pas d'écriture dans la main courante : une question/réponse libre
+        // n'a pas vocation à y figurer (demande explicite) — elle reste
+        // consultable dans l'historique des appels IA (Admin), qui trace
+        // déjà le modèle utilisé ; on le renvoie aussi directement au front
+        // pour qu'il soit visible sans détour par l'admin.
         job.status = 'completed';
         job.progress = 100;
         job.analysis = response;
+        job.model = model || null;
       } catch (err) {
         job.status = 'error';
         job.error = err.message;
@@ -514,7 +510,28 @@ async function syncTeams(req, res, next) {
     const crisis = await repo.findById(Number(req.params.id));
     if (!crisis) throw new HttpError(404, 'Crise introuvable');
     if (!crisis.teams_thread_id) throw new HttpError(400, "Aucun fil Teams associé à cette crise.");
+    if (crisis.monitoring_paused) throw new HttpError(400, 'Suivi Teams/IA en pause pour cette crise — reprenez-le avant de synchroniser.');
     res.json({ jobId: startSyncJob(crisis, req.body?.model) });
+  } catch (err) { next(err); }
+}
+
+/** Met en pause ou reprend le suivi Teams/IA d'une crise (cycle temps réel
+ * automatique, "Synchro Teams" manuelle, relance après acquittement — voir
+ * les gardes correspondantes dans ce fichier et services/realtimeAnalysis.js). */
+async function setMonitoringPaused(req, res, next) {
+  try {
+    const crisis = await repo.findById(Number(req.params.id));
+    if (!crisis) throw new HttpError(404, 'Crise introuvable');
+    const paused = !!req.body.paused;
+    const updated = await repo.setMonitoringPaused(crisis.id, paused);
+    await repo.addEvent(crisis.id, {
+      content: paused
+        ? 'Suivi Teams et analyse IA mis en pause pour cette crise.'
+        : 'Suivi Teams et analyse IA repris pour cette crise.',
+      eventType: 'monitoring_pause',
+      createdBy: req.user.id,
+    });
+    res.json(updated);
   } catch (err) { next(err); }
 }
 
@@ -548,7 +565,7 @@ async function acknowledgeRealtimeAnalysis(req, res, next) {
       createdBy: req.user.id,
     });
 
-    const jobId = crisis.teams_thread_id ? startSyncJob(crisis) : null;
+    const jobId = (crisis.teams_thread_id && !crisis.monitoring_paused) ? startSyncJob(crisis) : null;
     res.json({ jobId });
   } catch (err) { next(err); }
 }
@@ -628,7 +645,7 @@ module.exports = {
   list, listLive, listTeamsSyncLog, getOne, create, update, removeCrisis, transition, listFamilies, listIaModels,
   listEvents, addEvent, listDecisions, addDecision, updateDecision,
   listMembers, addMember, removeMember,
-  searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus, syncTeams, acknowledgeRealtimeAnalysis, askIa,
+  searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus, syncTeams, setMonitoringPaused, acknowledgeRealtimeAnalysis, askIa,
   listMailboxes, addMailbox, refreshMailbox, removeMailbox,
   DEFAULT_IA_PROMPT, DEFAULT_SYNC_PROMPT,
 };
