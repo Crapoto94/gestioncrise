@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { RefreshCw, CheckCircle2, MessagesSquare, NotebookText, Sparkles, Paperclip } from 'lucide-react';
+import { RefreshCw, CheckCircle2, MessagesSquare, NotebookText, Sparkles, Paperclip, PauseCircle, PlayCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { SeverityBadge } from '../components/StatusBadge';
 import { AcknowledgeModal } from '../components/AcknowledgeModal';
@@ -22,7 +22,7 @@ async function runTeamsSync(crisisId: number): Promise<{ changed?: boolean; anal
 
 /** Envoie une question libre (+ documents joints) à l'IA pour une crise (job
  * async) et attend sa réponse — cf. AskIaBox. */
-async function runAskIa(crisisId: number, prompt: string, files: File[]): Promise<{ analysis?: string; error?: string }> {
+async function runAskIa(crisisId: number, prompt: string, files: File[]): Promise<{ analysis?: string; model?: string | null; error?: string }> {
   const form = new FormData();
   form.append('prompt', prompt);
   files.forEach((f) => form.append('files', f));
@@ -54,6 +54,7 @@ export function CrisesEnCours() {
   const [syncingId, setSyncingId] = useState<number | null>(null);
   const [syncMsg, setSyncMsg] = useState<{ id: number; text: string } | null>(null);
   const [bulkSync, setBulkSync] = useState<{ current: number; total: number; label: string } | null>(null);
+  const [pausingId, setPausingId] = useState<number | null>(null);
 
   function load() {
     setLoading(true);
@@ -84,6 +85,20 @@ export function CrisesEnCours() {
       setError((e as Error).message);
     } finally {
       setSyncingId(null);
+    }
+  }
+
+  /** Met en pause (ou reprend) le suivi Teams/IA d'une crise — le cycle
+   * automatique et "Synchro Teams" s'arrêtent tant qu'elle n'est pas reprise. */
+  async function togglePause(c: Crisis) {
+    setPausingId(c.id); setError(null);
+    try {
+      await api.post(`/crises/${c.id}/monitoring-pause`, { paused: !c.monitoring_paused });
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPausingId(null);
     }
   }
 
@@ -169,6 +184,9 @@ export function CrisesEnCours() {
                   <Link to={`/crises/${c.id}`} className="font-medium text-ville hover:underline">{c.title}</Link>
                   <SeverityBadge severity={c.severity} />
                   <span className="text-xs text-gray-400">{STATUS_LABELS[c.status]}</span>
+                  {c.monitoring_paused && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Suivi en pause</span>
+                  )}
                   <Link
                     to={`/crises/${c.id}`}
                     state={{ tab: 'Main courante' }}
@@ -180,11 +198,24 @@ export function CrisesEnCours() {
                 </div>
                 <div className="flex items-center gap-3">
                   {c.ia_realtime_analysis_at && (
-                    <span className="text-xs text-gray-400">Actualisé le {new Date(c.ia_realtime_analysis_at).toLocaleString('fr-FR')}</span>
+                    <span className="text-xs text-gray-400">
+                      Actualisé le {new Date(c.ia_realtime_analysis_at).toLocaleString('fr-FR')}
+                      {c.ia_realtime_analysis_model && ` — modèle : ${c.ia_realtime_analysis_model}`}
+                    </span>
                   )}
                   <button
+                    onClick={() => togglePause(c)}
+                    disabled={pausingId === c.id}
+                    title={c.monitoring_paused ? 'Reprendre le suivi Teams/IA de cette crise' : 'Mettre en pause le suivi Teams/IA de cette crise'}
+                    className="flex items-center gap-1.5 text-xs border px-2.5 py-1.5 rounded hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {pausingId === c.id ? <Spinner size={13} /> : c.monitoring_paused ? <PlayCircle size={13} /> : <PauseCircle size={13} />}
+                    {c.monitoring_paused ? 'Reprendre' : 'Pause'}
+                  </button>
+                  <button
                     onClick={() => syncTeams(c.id)}
-                    disabled={syncingId === c.id}
+                    disabled={syncingId === c.id || !!c.monitoring_paused}
+                    title={c.monitoring_paused ? 'Reprenez le suivi pour pouvoir synchroniser' : undefined}
                     className="flex items-center gap-1.5 text-xs border px-2.5 py-1.5 rounded hover:bg-gray-50 disabled:opacity-60"
                   >
                     {syncingId === c.id ? <Spinner size={13} /> : <MessagesSquare size={13} />}
@@ -194,9 +225,15 @@ export function CrisesEnCours() {
               </div>
               {syncMsg?.id === c.id && <p className="text-xs text-gray-500 -mt-2">{syncMsg.text}</p>}
 
+              {c.monitoring_paused && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded p-2">
+                  Suivi Teams et analyse IA en pause — reprenez-le pour réactiver le cycle automatique et la synchro manuelle.
+                  {c.ia_realtime_analysis && ' Dernière analyse connue ci-dessous.'}
+                </p>
+              )}
               {c.ia_realtime_analysis ? (
                 <div className="rendered-content text-sm border-t pt-3" dangerouslySetInnerHTML={{ __html: markdownToHtml(c.ia_realtime_analysis) }} />
-              ) : (
+              ) : !c.monitoring_paused && (
                 <div className="flex items-center gap-2 text-xs text-gray-400 border-t pt-3">
                   <Spinner size={13} /> Première analyse en cours — repassez dans quelques minutes.
                 </div>
@@ -257,14 +294,15 @@ export function CrisesEnCours() {
  * complément de l'analyse temps réel déjà affichée au-dessus (le backend
  * rappelle explicitement à l'IA le dernier prompt envoyé pour cette crise et
  * lui demande un éclairage nouveau, pas une redite, cf.
- * backend/utils/askIaPrompt.js). La réponse est journalisée dans la main
- * courante de la crise — d'où le lien ajouté à côté du titre pour la retrouver. */
+ * backend/utils/askIaPrompt.js). Question et réponse ne sont PAS
+ * journalisées dans la main courante (pas pertinent pour l'historique de la
+ * crise) — la réponse n'est visible qu'ici, avec le modèle qui a répondu. */
 function AskIaBox({ crisisId }: { crisisId: number }) {
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<{ text: string; model: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
@@ -275,7 +313,7 @@ function AskIaBox({ crisisId }: { crisisId: number }) {
       const status = await runAskIa(crisisId, prompt.trim(), files);
       if (status.error) setError(status.error);
       else {
-        setResult(status.analysis || null);
+        setResult(status.analysis ? { text: status.analysis, model: status.model || null } : null);
         setPrompt('');
         setFiles([]);
       }
@@ -328,9 +366,9 @@ function AskIaBox({ crisisId }: { crisisId: number }) {
           {result && (
             <div className="bg-gray-50 border rounded p-2">
               <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">
-                Réponse (aussi enregistrée dans la main courante)
+                Réponse{result.model && ` — modèle : ${result.model}`}
               </p>
-              <div className="rendered-content text-sm" dangerouslySetInnerHTML={{ __html: markdownToHtml(result) }} />
+              <div className="rendered-content text-sm" dangerouslySetInnerHTML={{ __html: markdownToHtml(result.text) }} />
             </div>
           )}
         </form>

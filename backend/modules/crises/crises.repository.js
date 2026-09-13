@@ -89,10 +89,14 @@ const acknowledgeRealtimeAnalysis = (id, { comment, userId }) =>
 const saveMonitoringHash = (id, hash) =>
   db.get(`UPDATE pgc.crises SET ia_realtime_monitoring_hash = $1 WHERE id = $2 RETURNING *`, [hash || null, id]);
 
-// Crises encore ouvertes avec un fil Teams associé — cible du cycle
-// d'analyse temps réel périodique.
+// Crises encore ouvertes avec un fil Teams associé — alimente la vue
+// "Crises en cours" (inclut les crises en pause, pour pouvoir les reprendre).
 const listOpenWithTeamsThread = () =>
   db.all(`SELECT * FROM pgc.crises WHERE status <> 'cloturee' AND teams_thread_id IS NOT NULL`);
+
+/** Met en pause (ou reprend) le suivi Teams/IA d'une crise — cf. migration 023. */
+const setMonitoringPaused = (id, paused) =>
+  db.get(`UPDATE pgc.crises SET monitoring_paused = $1, updated_at = now() WHERE id = $2 RETURNING *`, [paused, id]);
 
 // Trace chaque vérification du fil Teams — permet de savoir si le contenu
 // avait changé et si l'IA a donc été interrogée (voir migration 016).
@@ -282,5 +286,5 @@ module.exports = {
   updateDecision, acknowledgeDecision, unacknowledgeDecision, respondToDecision,
   addMember, listMembers, removeMember,
   saveTeamsImport, saveIaAnalysis, saveRealtimeAnalysis, acknowledgeRealtimeAnalysis, saveMonitoringHash, listOpenWithTeamsThread,
-  logTeamsSync, listRecentTeamsSyncLogs,
+  setMonitoringPaused, logTeamsSync, listRecentTeamsSyncLogs,
 };
