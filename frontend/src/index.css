@@ -19,4 +19,7 @@ body {
 .rendered-content strong { @apply font-semibold text-gray-900; }
 .rendered-content em { @apply italic; }
 .rendered-content a { @apply text-ville underline hover:text-ville-dark; }
+.rendered-content table { @apply w-full text-sm border-collapse mb-2.5; }
+.rendered-content th, .rendered-content td { @apply border border-gray-200 px-2 py-1 text-left align-top; }
+.rendered-content th { @apply bg-gray-50 font-semibold text-gray-700; }
 .rendered-content > *:last-child { @apply mb-0; }

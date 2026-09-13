@@ -74,6 +74,20 @@ async function queryAi(prompt, model, logContext = {}) {
   }
 }
 
+/** Dernier prompt réellement envoyé à l'IA pour cette crise (ingestion,
+ * diagnostic, synchro, analyse rétrospective...), hors 'ask' pour ne jamais
+ * s'auto-référencer — sert de base à "Poser une question à l'IA" (onglet
+ * Crises en cours) pour rappeler explicitement à l'IA ce qui lui a déjà été
+ * transmis, cf. utils/askIaPrompt.js. */
+async function getLastPrompt(crisisId) {
+  return db.get(
+    `SELECT kind, prompt, created_at FROM pgc.ia_call_log
+     WHERE crisis_id = $1 AND kind <> 'ask' AND prompt IS NOT NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [crisisId]
+  );
+}
+
 /** Chat de crise : historique de messages -> réponse de l'IA. */
 function chat(messages, context) {
   const prompt = [
@@ -111,4 +125,4 @@ async function ping() {
   }
 }
 
-module.exports = { queryAi, listModels, chat, genererSynthese, genererRetex, aideDecision, ping };
+module.exports = { queryAi, listModels, getLastPrompt, chat, genererSynthese, genererRetex, aideDecision, ping };

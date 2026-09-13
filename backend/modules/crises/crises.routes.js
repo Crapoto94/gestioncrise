@@ -37,6 +37,7 @@ router.post('/:id/teams/sync', auditLog('crises'), controller.syncTeams);
 router.post('/:id/teams/acknowledge', upload.single('file'), auditLog('crises'), controller.acknowledgeRealtimeAnalysis);
 router.post('/:id/analyze', controller.startAnalysis);
 router.get('/:id/analyze/status/:jobId', controller.getAnalysisStatus);
+router.post('/:id/ask', upload.array('files', 5), auditLog('crises'), controller.askIa);
 
 router.get('/:id/events', controller.listEvents);
 router.post('/:id/events', auditLog('crisis_events'), controller.addEvent);

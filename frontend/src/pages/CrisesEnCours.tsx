@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { RefreshCw, CheckCircle2, MessagesSquare } from 'lucide-react';
+import { RefreshCw, CheckCircle2, MessagesSquare, NotebookText, Sparkles, Paperclip } from 'lucide-react';
 import { api } from '../services/api';
 import { SeverityBadge } from '../components/StatusBadge';
 import { AcknowledgeModal } from '../components/AcknowledgeModal';
@@ -13,6 +13,20 @@ import type { Crisis, CrisisDecision } from '../types';
 /** Lance la synchro Teams d'une crise (job async) et attend son résultat. */
 async function runTeamsSync(crisisId: number): Promise<{ changed?: boolean; analysis?: string; eventsAdded?: number; decisionsAdded?: number; error?: string }> {
   const { data: job } = await api.post(`/crises/${crisisId}/teams/sync`);
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const { data: status } = await api.get(`/crises/${crisisId}/analyze/status/${job.jobId}`);
+    if (status.status === 'completed' || status.status === 'error') return status;
+  }
+}
+
+/** Envoie une question libre (+ documents joints) à l'IA pour une crise (job
+ * async) et attend sa réponse — cf. AskIaBox. */
+async function runAskIa(crisisId: number, prompt: string, files: File[]): Promise<{ analysis?: string; error?: string }> {
+  const form = new FormData();
+  form.append('prompt', prompt);
+  files.forEach((f) => form.append('files', f));
+  const { data: job } = await api.post(`/crises/${crisisId}/ask`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
   for (;;) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data: status } = await api.get(`/crises/${crisisId}/analyze/status/${job.jobId}`);
@@ -155,6 +169,14 @@ export function CrisesEnCours() {
                   <Link to={`/crises/${c.id}`} className="font-medium text-ville hover:underline">{c.title}</Link>
                   <SeverityBadge severity={c.severity} />
                   <span className="text-xs text-gray-400">{STATUS_LABELS[c.status]}</span>
+                  <Link
+                    to={`/crises/${c.id}`}
+                    state={{ tab: 'Main courante' }}
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-ville"
+                    title="Voir la main courante de cette crise"
+                  >
+                    <NotebookText size={13} /> Main courante
+                  </Link>
                 </div>
                 <div className="flex items-center gap-3">
                   {c.ia_realtime_analysis_at && (
@@ -211,6 +233,8 @@ export function CrisesEnCours() {
                   ))}
                 </div>
               )}
+
+              <AskIaBox crisisId={c.id} />
             </div>
           );
         })}
@@ -224,6 +248,92 @@ export function CrisesEnCours() {
       )}
       {responding && (
         <RespondModal decision={responding} onCancel={() => setResponding(null)} onConfirm={respond} />
+      )}
+    </div>
+  );
+}
+
+/** "Poser une question à l'IA" — prompt libre + documents joints en
+ * complément de l'analyse temps réel déjà affichée au-dessus (le backend
+ * rappelle explicitement à l'IA le dernier prompt envoyé pour cette crise et
+ * lui demande un éclairage nouveau, pas une redite, cf.
+ * backend/utils/askIaPrompt.js). La réponse est journalisée dans la main
+ * courante de la crise — d'où le lien ajouté à côté du titre pour la retrouver. */
+function AskIaBox({ crisisId }: { crisisId: number }) {
+  const [open, setOpen] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!prompt.trim() || sending) return;
+    setSending(true); setError(null); setResult(null);
+    try {
+      const status = await runAskIa(crisisId, prompt.trim(), files);
+      if (status.error) setError(status.error);
+      else {
+        setResult(status.analysis || null);
+        setPrompt('');
+        setFiles([]);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="border-t pt-3">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-ville">
+        <Sparkles size={13} /> Poser une question à l'IA sur cette crise
+      </button>
+      {open && (
+        <form onSubmit={submit} className="mt-2 space-y-2">
+          <p className="text-xs text-gray-400">
+            Vient compléter l'analyse ci-dessus — précisez ce que vous cherchez, joignez au besoin un document
+            (l'IA reçoit un rappel du dernier prompt déjà envoyé pour éviter les redites).
+          </p>
+          <textarea
+            className="w-full border rounded px-3 py-2 text-sm"
+            rows={2}
+            placeholder="Ex : compare cette crise à l'incident de mars et propose une cause racine…"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={sending}
+          />
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <label className="flex items-center gap-1.5 text-xs text-gray-500 border rounded px-2 py-1.5 cursor-pointer hover:bg-gray-50">
+              <Paperclip size={13} />
+              {files.length > 0 ? `${files.length} fichier(s)` : 'Joindre des documents'}
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                disabled={sending}
+              />
+            </label>
+            <button
+              disabled={sending || !prompt.trim()}
+              className="flex items-center gap-1.5 bg-ville text-white text-xs px-3 py-1.5 rounded hover:bg-ville-dark disabled:opacity-60"
+            >
+              {sending && <Spinner size={13} />} {sending ? 'Envoi…' : 'Envoyer à l\'IA'}
+            </button>
+          </div>
+          {error && <div className="text-red-600 text-xs">{error}</div>}
+          {result && (
+            <div className="bg-gray-50 border rounded p-2">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">
+                Réponse (aussi enregistrée dans la main courante)
+              </p>
+              <div className="rendered-content text-sm" dangerouslySetInnerHTML={{ __html: markdownToHtml(result) }} />
+            </div>
+          )}
+        </form>
       )}
     </div>
   );

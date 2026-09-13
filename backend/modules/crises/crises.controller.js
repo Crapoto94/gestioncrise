@@ -14,6 +14,8 @@ const { buildCrisisHistoryContext } = require('../../utils/crisisHistoryContext'
 const { buildDocumentReferenceContext } = require('../../utils/documentReferenceContext');
 const { buildCrisisDocumentsContext } = require('../../utils/crisisDocumentsContext');
 const { resolveIaModel } = require('../../utils/resolveIaModel');
+const { buildAskPrompt } = require('../../utils/askIaPrompt');
+const { extractDocumentText } = require('../../utils/extractDocumentText');
 const referenceDocumentsRepo = require('../referenceDocuments/referenceDocuments.repository');
 const { UPLOAD_DIR } = require('../../middlewares/upload');
 
@@ -302,6 +304,84 @@ function getAnalysisStatus(req, res) {
 }
 
 /**
+ * "Poser une question à l'IA" (Crises en cours) : prompt libre + documents
+ * joints en option, envoyé en complément explicite de la dernière analyse
+ * déjà produite pour cette crise (cf. utils/askIaPrompt.js — le prompt
+ * précédent lui est redonné en clair). Les fichiers joints sont conservés
+ * comme documents de la crise (visibles dans l'onglet Documents et pris en
+ * compte par les analyses suivantes), pas seulement consommés une fois. La
+ * réponse est journalisée dans la main courante pour rester visible sans
+ * avoir à repasser par cette case (même registre de jobs asynchrones que le
+ * reste de l'analyse IA — une génération peut prendre plusieurs minutes).
+ */
+async function askIa(req, res, next) {
+  try {
+    const crisis = await repo.findById(Number(req.params.id));
+    if (!crisis) throw new HttpError(404, 'Crise introuvable');
+    const userPrompt = (req.body.prompt || '').trim();
+    const files = req.files || [];
+    if (!userPrompt) throw new HttpError(400, 'Le prompt est obligatoire.');
+
+    const savedDocs = [];
+    for (const file of files) {
+      const doc = await documentsRepo.create({
+        crisisId: crisis.id, filename: file.filename, originalName: file.originalname,
+        mimeType: file.mimetype, sizeBytes: file.size, uploadedBy: req.user.id,
+      });
+      savedDocs.push(doc);
+    }
+
+    const jobId = `ask_${Date.now()}_${crisis.id}`;
+    analyzeJobs[jobId] = { status: 'starting', progress: 0, crisisId: crisis.id, createdAt: Date.now() };
+    res.json({ jobId });
+
+    (async () => {
+      const job = analyzeJobs[jobId];
+      try {
+        job.status = 'lecture des documents joints';
+        job.progress = 15;
+        const documentsText = savedDocs.length
+          ? (await Promise.all(savedDocs.map(async (doc) => {
+              const text = await extractDocumentText(path.join(UPLOAD_DIR, doc.filename), doc.mime_type);
+              const body = text ? text.slice(0, 3000) : '(contenu non extrait automatiquement pour ce format — nom du fichier ci-dessus uniquement)';
+              return `### ${doc.original_name}\n${body}`;
+            }))).join('\n\n')
+          : '';
+
+        job.status = 'préparation du prompt';
+        job.progress = 30;
+        const previousPrompt = await ia.getLastPrompt(crisis.id);
+        const prompt = buildAskPrompt({ crisis, userPrompt, documentsText, previousPrompt });
+
+        job.status = "envoi à l'IA Locale";
+        job.progress = 55;
+        const model = await resolveIaModel(settingsRepo, req.body?.model);
+        const response = await ia.queryAi(prompt, model, { kind: 'ask', crisisId: crisis.id });
+
+        job.status = 'enregistrement dans la main courante';
+        job.progress = 85;
+        // source par défaut ('manuel', pas 'ia') : c'est un humain qui a posé
+        // la question, l'entrée ne doit jamais être effacée par
+        // removeEventsBySource('ia') lors d'une prochaine analyse rétrospective.
+        const attachmentNote = savedDocs.length ? ` (pièce(s) jointe(s) : ${savedDocs.map((d) => d.original_name).join(', ')})` : '';
+        await repo.addEvent(crisis.id, {
+          content: `Question posée à l'IA : « ${userPrompt} »${attachmentNote}\n\nRéponse :\n${response}`,
+          eventType: 'ia_question_libre',
+          createdBy: req.user.id,
+        });
+
+        job.status = 'completed';
+        job.progress = 100;
+        job.analysis = response;
+      } catch (err) {
+        job.status = 'error';
+        job.error = err.message;
+      }
+    })();
+  } catch (err) { next(err); }
+}
+
+/**
  * "Synchro Teams" : ré-importe le fil (avec repérage des photos/pièces
  * jointes), fournit à l'IA la main courante et les actions déjà connues, et
  * lui demande de proposer UNIQUEMENT le nouveau (jamais de doublon avec
@@ -396,9 +476,14 @@ function startSyncJob(crisis, explicitModel) {
           if (!item?.quoi) continue;
           const key = item.quoi.toLowerCase().slice(0, 30);
           if (existingTitles.some((t) => t.includes(key))) continue;
+          // source: 'ia_realtime' (et non 'ia_sync') — c'est cette valeur que
+          // le front interroge pour les "Propositions à traiter" (Crises en
+          // cours) et le badge "IA temps réel" (onglet Décisions) : une
+          // synchro manuelle doit alimenter la même liste que le cycle
+          // automatique, pas une source parallèle jamais affichée.
           await repo.addDecision(crisis.id, {
             title: item.quoi, ownerLabel: item.qui || null,
-            horizon: VALID_HORIZONS.includes(item.terme) ? item.terme : 'court_terme', source: 'ia_sync',
+            horizon: VALID_HORIZONS.includes(item.terme) ? item.terme : 'court_terme', source: 'ia_realtime',
           });
           decisionsAdded++;
         }
@@ -543,7 +628,7 @@ module.exports = {
   list, listLive, listTeamsSyncLog, getOne, create, update, removeCrisis, transition, listFamilies, listIaModels,
   listEvents, addEvent, listDecisions, addDecision, updateDecision,
   listMembers, addMember, removeMember,
-  searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus, syncTeams, acknowledgeRealtimeAnalysis,
+  searchTeamsThreads, importTeamsThread, startAnalysis, getAnalysisStatus, syncTeams, acknowledgeRealtimeAnalysis, askIa,
   listMailboxes, addMailbox, refreshMailbox, removeMailbox,
   DEFAULT_IA_PROMPT, DEFAULT_SYNC_PROMPT,
 };
