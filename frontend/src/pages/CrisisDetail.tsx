@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Pencil, Trash2 } from 'lucide-react';
 import { api, downloadFile } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -38,10 +38,13 @@ const WORKFLOW = ['detection', 'qualification', 'cellule', 'resolution', 'retex'
 export function CrisisDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasRole } = useAuth();
   const crisisId = Number(id);
   const [crisis, setCrisis] = useState<Crisis | null>(null);
-  const [tab, setTab] = useState<Tab>('Synthèse');
+  // Un lien depuis une autre page (ex. "Crises en cours") peut demander à
+  // arriver directement sur un onglet donné, ex. { state: { tab: 'Main courante' } }.
+  const [tab, setTab] = useState<Tab>((location.state as { tab?: Tab } | null)?.tab || 'Synthèse');
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
